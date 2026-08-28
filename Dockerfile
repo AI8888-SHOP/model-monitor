@@ -1,16 +1,31 @@
-FROM python:3.13-slim
+FROM golang:1.22-alpine AS build
+
+WORKDIR /src
+
+ARG TARGETOS
+ARG TARGETARCH
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY main.go main_test.go ./
+COPY web ./web
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags='-s -w' -o /out/model-monitor .
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
+COPY --from=build /out/model-monitor /app/model-monitor
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+ENV DATA_DIR=/app/data \
+    LISTEN_HOST=0.0.0.0 \
+    LISTEN_PORT=8020
 
-COPY requirements.txt /app/requirements.txt
-
-RUN pip install --no-cache-dir -r /app/requirements.txt
-
-COPY monitor.py /app/monitor.py
-
+VOLUME ["/app/data"]
 EXPOSE 8020
 
-CMD ["python", "/app/monitor.py"]
+ENTRYPOINT ["/app/model-monitor"]

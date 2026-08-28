@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模型监控管理后台</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #171b21;
+    --panel-2: #20262e;
+    --line: #2d3540;
+    --text: #e5e7eb;
+    --muted: #8f9aa8;
+    --blue: #5aa8ff;
+    --green: #40c463;
+    --amber: #d89b21;
+    --red: #ef5b57;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .shell { width: min(1420px, calc(100vw - 32px)); margin: 0 auto; padding: 22px 0 40px; }
+  .topbar { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; margin-bottom: 18px; }
+  h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+  h2 { margin: 0; font-size: 16px; }
+  .sub { color: var(--muted); margin-top: 7px; font-size: 14px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+  button, .button { border: 1px solid var(--line); color: var(--text); background: var(--panel-2); border-radius: 7px; padding: 9px 12px; font-size: 14px; cursor: pointer; text-decoration: none; line-height: 1; }
+  button:hover, .button:hover { border-color: #526071; }
+  button.primary { background: #1d4f83; border-color: #3477b9; }
+  button.danger { color: #ffd5d2; border-color: #73302e; background: #3a1d1d; }
+  input, select, textarea { width: 100%; background: #11151a; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 8px 10px; font-size: 14px; min-height: 36px; }
+  textarea { min-height: 70px; resize: vertical; }
+  label { color: var(--muted); font-size: 12px; display: block; margin-bottom: 6px; }
+  .section { margin-top: 18px; }
+  .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th { text-align: left; color: #a9b4c2; font-size: 12px; font-weight: 650; background: #20262e; padding: 10px; white-space: nowrap; }
+  td { border-top: 1px solid var(--line); padding: 10px; font-size: 14px; vertical-align: top; }
+  .muted { color: var(--muted); }
+  .green { color: var(--green); }
+  .amber { color: var(--amber); }
+  .red { color: var(--red); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .models { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+  .model-toggle { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--line); border-radius: 7px; padding: 8px; background: #12161b; }
+  .model-toggle input { width: auto; min-height: 0; margin-top: 2px; }
+  .model-toggle span { word-break: break-all; font-size: 13px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .toolbar input { width: min(360px, 100%); }
+  .check-field { min-height: 36px; display: flex; align-items: center; gap: 9px; padding: 8px 10px; background: #11151a; border: 1px solid var(--line); border-radius: 7px; }
+  .check-field input { width: auto; min-height: 0; margin: 0; }
+  .check-field span { color: var(--text); font-size: 14px; }
+  .status-line { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 13px; }
+  .status-line span { min-width: 0; overflow-wrap: anywhere; }
+  .status-pill { display: inline-flex; align-items: center; min-height: 28px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; background: #11151a; font-size: 13px; }
+  .qq-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .qq-model-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .qq-model-group + .qq-model-group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .notice { min-height: 20px; font-size: 14px; }
+  .empty { color: var(--muted); padding: 18px; border: 1px dashed var(--line); border-radius: 8px; background: #12161b; }
+  @media (max-width: 1050px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid-2 { grid-template-columns: 1fr; } }
+  @media (max-width: 720px) { .shell { width: min(100vw - 20px, 1420px); padding-top: 14px; } .topbar { flex-direction: column; } .actions { justify-content: flex-start; } .grid { grid-template-columns: 1fr; } .table-wrap { overflow-x: auto; } table { min-width: 960px; } }
+</style>
+</head>
+<body>
+<main class="shell">
+  <div class="topbar">
+    <div>
+      <h1>管理后台</h1>
+      <div class="sub">上次检测：<strong id="lastCheck">加载中</strong> · 状态：<strong id="runState">-</strong></div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="saveBtn" type="button">保存配置</button>
+      <button id="runBtn" type="button">立即检测</button>
+      <a class="button" href="/">返回仪表盘</a>
+    </div>
+  </div>
+  <div id="notice" class="notice muted"></div>
+
+  <section class="section panel">
+    <div class="section-head"><h2>全局设置</h2></div>
+    <div class="grid">
+      <div><label>检测间隔（秒）</label><input id="checkInterval" type="number" min="10" max="86400"></div>
+      <div><label>并发数</label><input id="maxWorkers" type="number" min="1" max="128"></div>
+      <div><label>历史保留（小时）</label><input id="retention" type="number" min="24" max="2160"></div>
+      <div><label>已忽略模型</label><input id="ignoredCount" readonly></div>
+    </div>
+  </section>
+
+  <section class="section panel">
+    <div class="section-head">
+      <h2>QQ群状态推送</h2>
+      <span id="qqPushState" class="status-pill muted">未启用</span>
+    </div>
+    <div class="grid">
+      <div>
+        <label>定时推送</label>
+        <label class="check-field"><input id="qqEnabled" type="checkbox"><span>启用</span></label>
+      </div>
+      <div>
+        <label>@ 查询</label>
+        <label class="check-field"><input id="qqMentionEnabled" type="checkbox"><span>有人 @ 时回复</span></label>
+      </div>
+      <div><label>机器人 AppID</label><input id="qqAppId" autocomplete="off"></div>
+      <div><label>机器人 AppSecret</label><input id="qqAppSecret" type="password" autocomplete="new-password"></div>
+      <div><label>推送间隔（分钟）</label><input id="qqInterval" type="number" min="1" max="1440" value="5"></div>
+    </div>
+    <div class="qq-controls">
+      <button class="primary" id="qqBindBtn" type="button">绑定目标群</button>
+      <button id="qqCancelBindBtn" type="button" hidden>停止绑定</button>
+      <button id="qqTestBtn" type="button">发送测试</button>
+      <button class="danger" id="qqUnbindBtn" type="button">解除绑定</button>
+    </div>
+    <div class="status-line" style="margin-top:12px">
+      <span>群：<strong id="qqGroupState">未绑定</strong></span>
+      <span>@监听：<strong id="qqMentionState">未启用</strong></span>
+      <span id="qqCaptureMessage">尚未开始绑定</span>
+      <span>上次@回复：<strong id="qqLastMention">无</strong></span>
+      <span>上次推送：<strong id="qqLastPush">无</strong></span>
+      <span>下次推送：<strong id="qqNextPush">无</strong></span>
+    </div>
+  </section>
+
+  <section class="section panel">
+    <div class="qq-model-head">
+      <div><h2>QQ推送模型</h2><div class="sub"><span id="qqSelectedCount">0</span> 个已选择</div></div>
+      <div class="toolbar">
+        <input id="qqModelSearch" placeholder="搜索推送模型" autocomplete="off">
+        <button id="qqSelectAllBtn" type="button">全选</button>
+        <button id="qqClearAllBtn" type="button">清空</button>
+      </div>
+    </div>
+    <div id="qqModelLists"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2>分组</h2>
+      <button id="addGroupBtn" type="button">新增分组</button>
+    </div>
+    <div class="table-wrap"><table id="groupTable"></table></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2>API</h2>
+      <button id="addApiBtn" type="button">新增 API</button>
+    </div>
+    <div class="table-wrap"><table id="apiTable"></table></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2>模型监控选择</h2>
+      <div class="toolbar"><input id="modelSearch" placeholder="搜索模型" autocomplete="off"></div>
+    </div>
+    <div id="modelLists"></div>
+  </section>
+</main>
+
+<script>
+const state = { config: null, models: [], runtime: null };
+let qqPollTimer = null;
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+function uid(prefix) {
+  return `${prefix}_${Math.random().toString(16).slice(2, 10)}${Date.now().toString(16).slice(-4)}`;
+}
+function notice(text, cls='muted') {
+  const el = document.getElementById('notice');
+  el.className = `notice ${cls}`;
+  el.textContent = text;
+}
+function groupOptions(selected) {
+  return state.config.groups.map(group => `<option value="${esc(group.id)}" ${group.id === selected ? 'selected' : ''}>${esc(group.name)}</option>`).join('');
+}
+function modelReferenceValue(reference) {
+  return reference && reference.endpoint_id && reference.model_id
+    ? `${reference.endpoint_id}|${reference.model_id}`
+    : '';
+}
+function parseModelReference(value) {
+  const parts = String(value || '').split('|');
+  const endpoint_id = parts.shift();
+  const model_id = parts.join('|');
+  return endpoint_id && model_id ? {endpoint_id, model_id} : null;
+}
+function defaultModelOptions(group) {
+  const current = modelReferenceValue(group.default_model);
+  const options = [{value: '', label: '自动选择第一个'}];
+  state.models.forEach(api => {
+    const endpoint = state.config.endpoints.find(item => item.id === api.endpoint_id);
+    if (!endpoint || endpoint.group_id !== group.id) return;
+    api.models.filter(model => !model.ignored).forEach(model => {
+      options.push({
+        value: `${api.endpoint_id}|${model.id}`,
+        label: `${api.endpoint_name} / ${model.id}`,
+      });
+    });
+  });
+  if (current && !options.some(option => option.value === current)) {
+    options.push({value: current, label: `${group.default_model.model_id}（当前配置）`});
+  }
+  return options.map(option => `<option value="${esc(option.value)}" ${option.value === current ? 'selected' : ''}>${esc(option.label)}</option>`).join('');
+}
+function qqSettings() {
+  if (!state.config.qq_push) {
+    state.config.qq_push = {enabled: false, mention_enabled: false, app_id: '', app_secret: '', group_openid: '', interval_minutes: 5, selected_models: []};
+  }
+  if (!Array.isArray(state.config.qq_push.selected_models)) state.config.qq_push.selected_models = [];
+  return state.config.qq_push;
+}
+function qqModelIsSelected(endpointId, modelId) {
+  return qqSettings().selected_models.some(item => item.endpoint_id === endpointId && item.model_id === modelId);
+}
+function setQQModelSelected(endpointId, modelId, selected) {
+  const qq = qqSettings();
+  qq.selected_models = qq.selected_models.filter(item => !(item.endpoint_id === endpointId && item.model_id === modelId));
+  if (selected) qq.selected_models.push({endpoint_id: endpointId, model_id: modelId});
+  const api = state.models.find(item => item.endpoint_id === endpointId);
+  const model = api && api.models.find(item => item.id === modelId);
+  if (model) model.qq_selected = selected;
+}
+function syncGlobalsFromDom() {
+  state.config.check_interval = Number(document.getElementById('checkInterval').value || 60);
+  state.config.max_workers = Number(document.getElementById('maxWorkers').value || 16);
+  state.config.history_retention_hours = Number(document.getElementById('retention').value || 72);
+}
+function syncQQFromDom() {
+  const qq = qqSettings();
+  qq.enabled = document.getElementById('qqEnabled').checked;
+  qq.mention_enabled = document.getElementById('qqMentionEnabled').checked;
+  qq.app_id = document.getElementById('qqAppId').value.trim();
+  const secret = document.getElementById('qqAppSecret').value.trim();
+  if (secret) qq.app_secret = secret;
+  qq.interval_minutes = Number(document.getElementById('qqInterval').value || 5);
+}
+function renderGlobals() {
+  document.getElementById('checkInterval').value = state.config.check_interval;
+  document.getElementById('maxWorkers').value = state.config.max_workers;
+  document.getElementById('retention').value = state.config.history_retention_hours;
+  document.getElementById('ignoredCount').value = state.config.ignored_models.length;
+  document.getElementById('lastCheck').textContent = state.runtime.last_check_finished_at || '尚未检测';
+  document.getElementById('runState').textContent = state.runtime.check_running ? '检测中' : '空闲';
+}
+function renderQQPush() {
+  const qq = qqSettings();
+  const runtime = state.runtime.qq_push || {};
+  const activeCapture = ['connecting', 'waiting_message'].includes(runtime.capture_status);
+  document.getElementById('qqEnabled').checked = Boolean(qq.enabled);
+  document.getElementById('qqMentionEnabled').checked = Boolean(qq.mention_enabled);
+  document.getElementById('qqAppId').value = qq.app_id || '';
+  document.getElementById('qqAppSecret').value = '';
+  document.getElementById('qqAppSecret').placeholder = qq.app_secret_set ? '已保存，留空不变' : '未设置';
+  document.getElementById('qqInterval').value = qq.interval_minutes || 5;
+  document.getElementById('qqGroupState').textContent = qq.group_bound ? '已绑定' : '未绑定';
+  document.getElementById('qqMentionState').textContent = runtime.mention_message || '未启用';
+  document.getElementById('qqCaptureMessage').textContent = runtime.capture_message || (qq.group_bound ? '目标群已绑定' : '尚未开始绑定');
+  document.getElementById('qqLastMention').textContent = runtime.last_mention_at || '无';
+  document.getElementById('qqLastPush').textContent = runtime.last_push_at || '无';
+  document.getElementById('qqNextPush').textContent = runtime.next_push_at || '无';
+  const stateEl = document.getElementById('qqPushState');
+  const ready = Boolean(qq.app_id && qq.app_secret_set && qq.group_bound && qq.selected_models.length);
+  const modes = [qq.enabled ? '定时' : '', qq.mention_enabled ? '@响应' : ''].filter(Boolean);
+  const active = modes.length > 0;
+  stateEl.textContent = active ? (ready ? modes.join(' + ') : '配置未完成') : '未启用';
+  stateEl.className = `status-pill ${active && ready ? 'green' : active ? 'amber' : 'muted'}`;
+  if (runtime.last_push_ok === false && runtime.last_push_error) {
+    document.getElementById('qqLastPush').textContent = `${runtime.last_push_at || '失败'} · ${runtime.last_push_error}`;
+    document.getElementById('qqLastPush').className = 'red';
+  } else {
+    document.getElementById('qqLastPush').className = runtime.last_push_ok ? 'green' : '';
+  }
+  if (runtime.last_mention_ok === false && runtime.last_mention_error) {
+    document.getElementById('qqLastMention').textContent = `${runtime.last_mention_at || '失败'} · ${runtime.last_mention_error}`;
+    document.getElementById('qqLastMention').className = 'red';
+  } else {
+    document.getElementById('qqLastMention').className = runtime.last_mention_ok ? 'green' : '';
+  }
+  document.getElementById('qqBindBtn').disabled = activeCapture;
+  document.getElementById('qqCancelBindBtn').hidden = !activeCapture;
+  document.getElementById('qqUnbindBtn').disabled = !qq.group_bound;
+}
+
+function renderQQModels() {
+  const query = document.getElementById('qqModelSearch').value.trim().toLowerCase();
+  let visibleCount = 0;
+  const blocks = state.models.map(api => {
+    const models = api.models.filter(model => !query || model.id.toLowerCase().includes(query));
+    visibleCount += models.length;
+    const body = models.map(model => {
+      const selected = qqModelIsSelected(api.endpoint_id, model.id);
+      return `<label class="model-toggle">
+        <input type="checkbox" data-qq-endpoint="${esc(api.endpoint_id)}" data-qq-model="${esc(model.id)}" ${selected ? 'checked' : ''} ${model.ignored ? 'disabled' : ''}>
+        <span class="mono ${model.ignored ? 'muted' : ''}">${esc(model.id)}${model.ignored ? '（已忽略）' : ''}</span>
+      </label>`;
+    }).join('');
+    return `<div class="qq-model-group">
+      <div class="section-head"><h2>${esc(api.endpoint_name)}</h2><span class="muted">${api.models.length} 个模型</span></div>
+      <div class="models">${body || '<div class="empty">暂无匹配模型</div>'}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('qqModelLists').innerHTML = visibleCount ? blocks : '<div class="empty">暂无可选模型，请先执行检测</div>';
+  document.getElementById('qqSelectedCount').textContent = qqSettings().selected_models.length;
+  document.querySelectorAll('[data-qq-endpoint]').forEach(input => input.addEventListener('change', event => {
+    setQQModelSelected(event.target.dataset.qqEndpoint, event.target.dataset.qqModel, event.target.checked);
+    document.getElementById('qqSelectedCount').textContent = qqSettings().selected_models.length;
+  }));
+}
+function renderGroups() {
+  const rows = state.config.groups.map((group, idx) => `
+    <tr data-index="${idx}">
+      <td><input data-field="name" value="${esc(group.name)}"></td>
+      <td><input data-field="description" value="${esc(group.description || '')}"></td>
+      <td><select data-field="enabled"><option value="true" ${group.enabled ? 'selected' : ''}>启用</option><option value="false" ${!group.enabled ? 'selected' : ''}>停用</option></select></td>
+      <td><input data-field="check_interval" type="number" min="10" max="86400" value="${esc(group.check_interval || state.config.check_interval || 60)}"></td>
+      <td><input data-field="timeout" type="number" min="5" max="600" value="${esc(group.timeout || 180)}"></td>
+      <td><select data-field="default_model">${defaultModelOptions(group)}</select></td>
+      <td class="mono muted">${esc(group.id)}</td>
+      <td><div class="row-actions"><button data-action="move-group-up" type="button" ${idx === 0 ? 'disabled' : ''}>上移</button><button data-action="move-group-down" type="button" ${idx === state.config.groups.length - 1 ? 'disabled' : ''}>下移</button><button data-action="clear-group" type="button">清零</button><button class="danger" data-action="delete-group" type="button">删除</button></div></td>
+    </tr>`).join('');
+  document.getElementById('groupTable').innerHTML = `<thead><tr><th>名称</th><th>备注</th><th>状态</th><th>检测间隔（秒）</th><th>检测超时（秒）</th><th>默认显示模型</th><th>ID</th><th>操作</th></tr></thead><tbody>${rows}</tbody>`;
+  document.querySelectorAll('#groupTable input, #groupTable select').forEach(el => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', event => {
+    const tr = event.target.closest('tr');
+    const group = state.config.groups[Number(tr.dataset.index)];
+    const field = event.target.dataset.field;
+    if (field === 'enabled') group[field] = event.target.value === 'true';
+    else if (field === 'check_interval') group[field] = Number(event.target.value || state.config.check_interval || 60);
+    else if (field === 'timeout') group[field] = Number(event.target.value || 180);
+    else if (field === 'default_model') group[field] = parseModelReference(event.target.value);
+    else group[field] = event.target.value;
+    renderApis();
+  }));
+  document.querySelectorAll('[data-action="move-group-up"], [data-action="move-group-down"]').forEach(btn => btn.addEventListener('click', event => {
+    const tr = event.target.closest('tr');
+    const idx = Number(tr.dataset.index);
+    const direction = event.target.dataset.action === 'move-group-up' ? -1 : 1;
+    const nextIdx = idx + direction;
+    if (nextIdx < 0 || nextIdx >= state.config.groups.length) return;
+    const tmp = state.config.groups[idx];
+    state.config.groups[idx] = state.config.groups[nextIdx];
+    state.config.groups[nextIdx] = tmp;
+    renderAll();
+  }));
+  document.querySelectorAll('[data-action="clear-group"]').forEach(btn => btn.addEventListener('click', async event => {
+    try {
+      const idx = Number(event.target.closest('tr').dataset.index);
+      const group = state.config.groups[idx];
+      if (!group) return;
+      if (!confirm(`清零分组「${group.name}」的历史和当前检测结果？`)) return;
+      const res = await fetch('/api/admin/clear-group', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({group_id: group.id})
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || '清零失败');
+      notice(`已清零分组「${group.name}」`, 'green');
+      await load();
+    } catch (err) {
+      notice(err.message, 'red');
+    }
+  }));
+  document.querySelectorAll('[data-action="delete-group"]').forEach(btn => btn.addEventListener('click', event => {
+    if (state.config.groups.length <= 1) return notice('至少保留一个分组', 'amber');
+    const idx = Number(event.target.closest('tr').dataset.index);
+    const removed = state.config.groups[idx];
+    state.config.groups.splice(idx, 1);
+    const fallback = state.config.groups[0].id;
+    state.config.endpoints.forEach(api => { if (api.group_id === removed.id) api.group_id = fallback; });
+    renderAll();
+  }));
+}
+function renderApis() {
+  const rows = state.config.endpoints.map((api, idx) => `
+    <tr data-index="${idx}">
+      <td><input data-field="name" value="${esc(api.name)}"></td>
+      <td><input data-field="base_url" class="mono" value="${esc(api.base_url)}"></td>
+      <td><input data-field="api_key" class="mono" type="password" value="${esc(api.api_key || '')}"></td>
+      <td><select data-field="group_id">${groupOptions(api.group_id)}</select></td>
+      <td><select data-field="enabled"><option value="true" ${api.enabled ? 'selected' : ''}>启用</option><option value="false" ${!api.enabled ? 'selected' : ''}>停用</option></select></td>
+      <td><input data-field="test_prompt" value="${esc(api.test_prompt || 'Hi')}"></td>
+      <td><button class="danger" data-action="delete-api" type="button">删除</button></td>
+    </tr>`).join('');
+  document.getElementById('apiTable').innerHTML = `<thead><tr><th>名称</th><th>Base URL</th><th>API Key</th><th>分组</th><th>状态</th><th>测试提示词</th><th>操作</th></tr></thead><tbody>${rows}</tbody>`;
+  document.querySelectorAll('#apiTable input, #apiTable select').forEach(el => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', event => {
+    const tr = event.target.closest('tr');
+    const api = state.config.endpoints[Number(tr.dataset.index)];
+    const field = event.target.dataset.field;
+    if (field === 'enabled') api[field] = event.target.value === 'true';
+    else if (field === 'group_id') {
+      api[field] = event.target.value;
+      state.config.groups.forEach(group => {
+        if (group.default_model && group.default_model.endpoint_id === api.id && group.id !== api.group_id) {
+          group.default_model = null;
+        }
+      });
+      renderGroups();
+    } else api[field] = event.target.value;
+  }));
+  document.querySelectorAll('[data-action="delete-api"]').forEach(btn => btn.addEventListener('click', event => {
+    const idx = Number(event.target.closest('tr').dataset.index);
+    const removed = state.config.endpoints[idx];
+    state.config.endpoints.splice(idx, 1);
+    state.config.ignored_models = state.config.ignored_models.filter(item => item.endpoint_id !== removed.id);
+    qqSettings().selected_models = qqSettings().selected_models.filter(item => item.endpoint_id !== removed.id);
+    state.config.groups.forEach(group => {
+      if (group.default_model && group.default_model.endpoint_id === removed.id) group.default_model = null;
+    });
+    state.models = state.models.filter(item => item.endpoint_id !== removed.id);
+    renderAll();
+  }));
+}
+function renderModels() {
+  const q = document.getElementById('modelSearch').value.trim().toLowerCase();
+  const html = state.models.map(api => {
+    const models = api.models.filter(model => !q || model.id.toLowerCase().includes(q));
+    const body = models.map(model => `
+      <label class="model-toggle">
+        <input type="checkbox" data-endpoint="${esc(api.endpoint_id)}" data-model="${esc(model.id)}" ${model.ignored ? 'checked' : ''}>
+        <span class="mono ${model.ignored ? 'muted' : ''}">${esc(model.id)}</span>
+      </label>`).join('');
+    return `<div class="section panel">
+      <div class="section-head"><h2>${esc(api.endpoint_name)}</h2><span class="muted">${api.models.length} 个模型</span></div>
+      ${api.fetch_error ? `<div class="red">拉取模型失败：${esc(api.fetch_error)}</div>` : ''}
+      <div class="models">${body || '<div class="empty">暂无模型，请先保存配置并执行检测</div>'}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('modelLists').innerHTML = html || '<div class="empty">暂无 API</div>';
+  document.querySelectorAll('#modelLists input[type="checkbox"]').forEach(el => el.addEventListener('change', async event => {
+    const endpoint_id = event.target.dataset.endpoint;
+    const model_id = event.target.dataset.model;
+    const ignored = event.target.checked;
+    await fetch('/api/admin/ignore', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({endpoint_id, model_id, ignored})
+    });
+    const item = state.config.ignored_models.find(row => row.endpoint_id === endpoint_id && row.model_id === model_id);
+    if (ignored && !item) state.config.ignored_models.push({endpoint_id, model_id});
+    if (!ignored) state.config.ignored_models = state.config.ignored_models.filter(row => !(row.endpoint_id === endpoint_id && row.model_id === model_id));
+    if (ignored) setQQModelSelected(endpoint_id, model_id, false);
+    if (ignored) {
+      state.config.groups.forEach(group => {
+        if (group.default_model && group.default_model.endpoint_id === endpoint_id && group.default_model.model_id === model_id) {
+          group.default_model = null;
+        }
+      });
+      renderGroups();
+    }
+    const api = state.models.find(row => row.endpoint_id === endpoint_id);
+    const model = api && api.models.find(row => row.id === model_id);
+    if (model) model.ignored = ignored;
+    renderGlobals();
+    renderQQModels();
+    notice(ignored ? '已忽略该模型' : '已恢复监控该模型', 'green');
+  }));
+}
+function renderAll() {
+  renderGlobals();
+  renderQQPush();
+  renderQQModels();
+  renderGroups();
+  renderApis();
+  renderModels();
+}
+async function load() {
+  const res = await fetch('/api/admin/config', {cache:'no-store'});
+  if (!res.ok) throw new Error(await res.text());
+  const payload = await res.json();
+  state.config = payload.config;
+  state.models = payload.models;
+  state.runtime = payload.runtime;
+  renderAll();
+}
+async function save() {
+  syncGlobalsFromDom();
+  syncQQFromDom();
+  const res = await fetch('/api/admin/config', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({config: state.config})
+  });
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || '保存失败');
+  state.config = payload.config;
+  notice('配置已保存', 'green');
+  renderAll();
+  return payload;
+}
+async function runNow() {
+  const res = await fetch('/api/admin/run', {method:'POST'});
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || '启动失败');
+  notice(payload.started ? '已开始检测' : '已有检测任务在运行', payload.started ? 'green' : 'amber');
+  setTimeout(load, 1200);
+}
+async function refreshQQStatus() {
+  const res = await fetch('/api/admin/qq/status', {cache: 'no-store'});
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || '读取 QQ 状态失败');
+  state.config.qq_push = payload.qq_push;
+  state.runtime.qq_push = payload.runtime;
+  renderQQPush();
+  const active = ['connecting', 'waiting_message'].includes(payload.runtime.capture_status);
+  if (!active && qqPollTimer) {
+    clearInterval(qqPollTimer);
+    qqPollTimer = null;
+    await load();
+  }
+}
+function startQQPolling() {
+  if (qqPollTimer) clearInterval(qqPollTimer);
+  qqPollTimer = setInterval(() => refreshQQStatus().catch(err => notice(err.message, 'red')), 2000);
+}
+async function startQQCapture() {
+  await save();
+  const res = await fetch('/api/admin/qq/capture', {method: 'POST'});
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || '启动绑定失败');
+  state.runtime.qq_push = payload.runtime;
+  renderQQPush();
+  notice(payload.started ? '绑定监听已启动' : '绑定监听正在运行', payload.started ? 'green' : 'amber');
+  startQQPolling();
+}
+async function cancelQQCapture() {
+  const res = await fetch('/api/admin/qq/cancel-capture', {method: 'POST'});
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || '停止绑定失败');
+  notice('正在停止绑定监听', 'muted');
+  startQQPolling();
+}
+async function unbindQQGroup() {
+  if (!confirm('解除当前 QQ 目标群绑定？')) return;
+  const res = await fetch('/api/admin/qq/unbind', {method: 'POST'});
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || '解除绑定失败');
+  notice('目标群绑定已解除', 'green');
+  await load();
+}
+async function testQQPush() {
+  await save();
+  notice('正在发送 QQ 测试消息', 'muted');
+  const res = await fetch('/api/admin/qq/test', {method: 'POST'});
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || '测试推送失败');
+  state.runtime.qq_push = payload.runtime;
+  renderQQPush();
+  notice('QQ 测试消息已发送', 'green');
+}
+document.getElementById('saveBtn').addEventListener('click', () => save().catch(err => notice(err.message, 'red')));
+document.getElementById('runBtn').addEventListener('click', () => runNow().catch(err => notice(err.message, 'red')));
+document.getElementById('qqBindBtn').addEventListener('click', () => startQQCapture().catch(err => notice(err.message, 'red')));
+document.getElementById('qqCancelBindBtn').addEventListener('click', () => cancelQQCapture().catch(err => notice(err.message, 'red')));
+document.getElementById('qqUnbindBtn').addEventListener('click', () => unbindQQGroup().catch(err => notice(err.message, 'red')));
+document.getElementById('qqTestBtn').addEventListener('click', () => testQQPush().catch(err => notice(err.message, 'red')));
+document.getElementById('qqSelectAllBtn').addEventListener('click', () => {
+  state.models.forEach(api => api.models.filter(model => !model.ignored).forEach(model => setQQModelSelected(api.endpoint_id, model.id, true)));
+  renderQQModels();
+});
+document.getElementById('qqClearAllBtn').addEventListener('click', () => {
+  qqSettings().selected_models = [];
+  state.models.forEach(api => api.models.forEach(model => { model.qq_selected = false; }));
+  renderQQModels();
+});
+document.getElementById('addGroupBtn').addEventListener('click', () => {
+  state.config.groups.push({id: uid('grp'), name: '新分组', description: '', enabled: true, check_interval: state.config.check_interval || 60, timeout: 180, default_model: null});
+  renderAll();
+});
+document.getElementById('addApiBtn').addEventListener('click', () => {
+  const group_id = state.config.groups[0] ? state.config.groups[0].id : uid('grp');
+  if (!state.config.groups.length) state.config.groups.push({id: group_id, name: '默认分组', description: '', enabled: true, check_interval: state.config.check_interval || 60, timeout: 180});
+  state.config.endpoints.push({id: uid('api'), name: '新 API', base_url: 'http://host.docker.internal:8080', api_key: '', group_id, enabled: true, test_prompt: 'Hi', max_tokens: 16});
+  renderAll();
+});
+document.getElementById('modelSearch').addEventListener('input', renderModels);
+document.getElementById('qqModelSearch').addEventListener('input', renderQQModels);
+['checkInterval','maxWorkers','retention'].forEach(id => document.getElementById(id).addEventListener('input', syncGlobalsFromDom));
+['qqEnabled','qqMentionEnabled','qqAppId','qqAppSecret','qqInterval'].forEach(id => document.getElementById(id).addEventListener('input', syncQQFromDom));
+load().catch(err => notice(err.message, 'red'));
+</script>
+</body>
+</html>

@@ -1,17 +1,9 @@
-# Model Monitor v2.0
+# Model Monitor v3.0
 
-OpenAI-compatible model availability monitor with a dark dashboard, grouped
-model cards, per-group default display models, bounded retries, latency
-classification, and optional QQ group status replies.
-
-## Features
-
-- One dashboard card per model group.
-- Configure the default model shown on each group card.
-- Click a group card to inspect every model in that group.
-- Show response latency, endpoint probe latency, availability, and recent checks.
-- Per-group check intervals and timeout limits.
-- Optional QQ scheduled status pushes and @ mention replies.
+OpenAI-compatible model availability monitor with a lightweight Go backend.
+It keeps the grouped dashboard, per-group default display models, response
+latency, availability history, bounded retries, Responses API fallback, and
+optional QQ group status pushes and @ mention replies.
 
 ## Docker
 
@@ -32,12 +24,21 @@ classification, and optional QQ group status replies.
 4. Open the dashboard at `http://127.0.0.1:8020` and the admin page at
    `http://127.0.0.1:8020/admin`.
 
-Runtime configuration and history are stored in `./data`. Do not commit that
-directory or `.env`.
+Runtime configuration and SQLite history are stored in `./data`. Do not commit
+that directory or `.env`.
 
-## Test
+## GHCR
 
 ```bash
-python3 -m unittest -v test_monitor.py
-python3 -m py_compile monitor.py test_monitor.py
+docker pull ghcr.io/ai8888-shop/model-monitor:v3.0
+```
+
+The image also has `3.0.0` and `latest` tags. The GHCR package must be set to
+public in its package settings before anonymous pulls are allowed.
+
+## Development
+
+```bash
+go test ./...
+go vet ./...
 ```

@@ -1,8 +1,7 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-monitor.log
 data/
 .env
 .env.*
+monitor.log
+*.tar.gz
+.git/
+.github/

@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模型状态</title>
+<style>
+  :root {
+    --bg: #050b12;
+    --surface: #101d2c;
+    --surface-2: #132338;
+    --surface-soft: #0d1928;
+    --line: #24364b;
+    --line-bright: #30475f;
+    --text: #ecf3f8;
+    --muted: #8da0b2;
+    --muted-2: #64788b;
+    --green: #59d26a;
+    --teal: #39d4af;
+    --amber: #e0b72a;
+    --red: #ff635f;
+    --blue: #7daee4;
+  }
+  * { box-sizing: border-box; }
+  html { min-width: 320px; background: var(--bg); }
+  body {
+    min-height: 100vh;
+    margin: 0;
+    overflow-x: hidden;
+    color: var(--text);
+    background:
+      linear-gradient(rgba(10, 28, 43, .28) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(10, 28, 43, .22) 1px, transparent 1px),
+      var(--bg);
+    background-size: 56px 56px;
+    font-family: "Avenir Next", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    letter-spacing: 0;
+  }
+  body::before {
+    position: fixed;
+    z-index: -1;
+    inset: 0;
+    pointer-events: none;
+    content: "";
+    background: linear-gradient(180deg, rgba(11, 37, 54, .34), transparent 42%);
+  }
+  button, input, select { font: inherit; }
+  button, a { -webkit-tap-highlight-color: transparent; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: .55; }
+
+  .shell {
+    width: min(100% - 56px, 1600px);
+    margin: 0 auto;
+    padding: 28px 0 54px;
+  }
+  .topbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 22px;
+    min-height: 58px;
+    margin-bottom: 24px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 13px;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .brand-mark, .model-mark {
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(57, 212, 175, .32);
+    border-radius: 12px;
+    color: var(--teal);
+    background: rgba(24, 100, 95, .25);
+    box-shadow: inset 0 0 18px rgba(57, 212, 175, .08);
+    font-size: 20px;
+  }
+  .brand-mark { width: 38px; height: 38px; }
+  .brand h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 720;
+    line-height: 1.1;
+  }
+  .brand p {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .topbar-tools {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .period-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: rgba(19, 35, 56, .9);
+  }
+  .period-button {
+    min-width: 54px;
+    border: 0;
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: var(--muted);
+    background: transparent;
+    font-size: 12px;
+  }
+  .period-button:hover { color: var(--text); }
+  .period-button.active {
+    color: var(--text);
+    background: #2c3c51;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .24);
+    font-weight: 700;
+  }
+  .health-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    border: 1px solid rgba(89, 210, 106, .22);
+    border-radius: 999px;
+    padding: 0 12px;
+    color: var(--green);
+    background: rgba(42, 124, 73, .16);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .04em;
+  }
+  .health-pill.degraded {
+    border-color: rgba(224, 183, 42, .26);
+    color: var(--amber);
+    background: rgba(147, 107, 23, .18);
+  }
+  .health-pill.pending {
+    border-color: var(--line);
+    color: var(--muted);
+    background: rgba(19, 35, 56, .72);
+  }
+  .health-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 10px currentColor;
+  }
+  .icon-button, .admin-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    border: 1px solid var(--line-bright);
+    border-radius: 8px;
+    color: var(--muted);
+    background: rgba(19, 35, 56, .86);
+    text-decoration: none;
+    font-size: 12px;
+  }
+  .icon-button {
+    width: 34px;
+    padding: 0;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .icon-button:hover, .admin-link:hover {
+    border-color: #4b667f;
+    color: var(--text);
+  }
+  .admin-link { gap: 6px; padding: 0 10px; }
+  .refresh-copy {
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .refresh-copy strong {
+    color: var(--blue);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
+  }
+  .toolbar-title {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+  }
+  .toolbar-title h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .toolbar-title span {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .search-box {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 220px;
+    min-height: 35px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0 10px;
+    background: rgba(13, 25, 40, .9);
+  }
+  .search-icon {
+    color: var(--muted-2);
+    font-size: 17px;
+    line-height: 1;
+  }
+  .search-box input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    color: var(--text);
+    background: transparent;
+    font-size: 12px;
+  }
+  .search-box:focus-within, .filter-select:focus {
+    border-color: #4c7891;
+    box-shadow: 0 0 0 3px rgba(57, 212, 175, .07);
+  }
+  .search-box input::placeholder { color: var(--muted-2); }
+  .filter-select {
+    min-height: 35px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    outline: 0;
+    padding: 0 10px;
+    color: var(--muted);
+    background: rgba(13, 25, 40, .9);
+    font-size: 12px;
+  }
+
+  .model-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 20px;
+    align-items: stretch;
+  }
+  .model-card {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: 340px;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 15px;
+    padding: 19px 20px 17px;
+    background: linear-gradient(145deg, rgba(20, 37, 55, .98), rgba(14, 27, 43, .98));
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .12);
+    transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+  }
+  .model-card::before {
+    position: absolute;
+    top: 0;
+    right: 22px;
+    left: 22px;
+    height: 1px;
+    content: "";
+    background: linear-gradient(90deg, transparent, rgba(57, 212, 175, .28), transparent);
+  }
+  .model-card:hover {
+    border-color: var(--line-bright);
+    box-shadow: 0 18px 38px rgba(0, 0, 0, .2);
+    transform: translateY(-2px);
+  }
+  .model-card.group-card { cursor: pointer; }
+  .model-card.group-card:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 3px;
+  }
+  .model-card.has-error::before {
+    background: linear-gradient(90deg, transparent, rgba(255, 99, 95, .5), transparent);
+  }
+  .card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 57px;
+  }
+  .identity {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 11px;
+  }
+  .model-mark { width: 38px; height: 38px; flex: 0 0 auto; }
+  .identity-copy { min-width: 0; }
+  .group-label {
+    overflow: hidden;
+    margin-bottom: 4px;
+    color: var(--muted);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .identity-copy h2 {
+    overflow: hidden;
+    margin: 0;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 750;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .model-line {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .api-badge {
+    flex: 0 0 auto;
+    border-radius: 4px;
+    padding: 3px 6px;
+    color: var(--teal);
+    background: rgba(22, 119, 101, .34);
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .model-id {
+    overflow: hidden;
+    color: #a8b7c5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .state-badge {
+    flex: 0 0 auto;
+    border: 1px solid rgba(89, 210, 106, .2);
+    border-radius: 999px;
+    padding: 5px 9px;
+    color: var(--green);
+    background: rgba(42, 124, 73, .17);
+    font-size: 10px;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+  .state-badge.danger {
+    border-color: rgba(255, 99, 95, .22);
+    color: var(--red);
+    background: rgba(149, 43, 48, .17);
+  }
+  .state-badge.pending {
+    border-color: var(--line);
+    color: var(--muted);
+    background: rgba(100, 120, 139, .14);
+  }
+
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    margin-top: 18px;
+  }
+  .metric {
+    min-width: 0;
+    min-height: 75px;
+    border: 1px solid rgba(48, 71, 95, .65);
+    border-radius: 12px;
+    padding: 12px 12px 10px;
+    background: rgba(13, 28, 45, .58);
+  }
+  .metric-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .metric-icon { color: var(--blue); font-size: 12px; }
+  .metric-value {
+    display: flex;
+    align-items: baseline;
+    gap: 3px;
+    margin-top: 10px;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 780;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .metric-value small {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 550;
+  }
+  .metric-value.good { color: var(--green); }
+  .metric-value.warn { color: var(--amber); }
+  .metric-value.bad { color: var(--red); }
+  .metric-value.muted { color: var(--muted-2); }
+
+  .availability {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 16px;
+    border-top: 1px solid rgba(48, 71, 95, .68);
+    padding-top: 13px;
+  }
+  .availability-label { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .availability-count {
+    margin-top: 6px;
+    color: var(--muted-2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 9px;
+  }
+  .availability-value {
+    color: var(--green);
+    font-size: 29px;
+    font-weight: 800;
+    letter-spacing: -.02em;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .availability-value.warn { color: var(--amber); }
+  .availability-value.bad { color: var(--red); }
+  .availability-value.muted { color: var(--muted-2); }
+
+  .history {
+    margin-top: 16px;
+    border-top: 1px solid rgba(48, 71, 95, .68);
+    padding-top: 12px;
+  }
+  .history-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 650;
+  }
+  .history-head strong {
+    color: var(--muted);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .history-track {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 45px;
+    margin-top: 7px;
+    border-bottom: 1px dashed rgba(141, 160, 178, .34);
+    padding: 0 1px;
+  }
+  .history-bar {
+    flex: 1 1 0;
+    min-width: 2px;
+    max-width: 6px;
+    height: var(--bar-height);
+    min-height: 4px;
+    border-radius: 2px 2px 0 0;
+    background: var(--green);
+    opacity: .95;
+  }
+  .history-bar.warn { background: var(--amber); }
+  .history-bar.bad { background: var(--red); }
+  .history-empty {
+    align-self: center;
+    margin: 0 auto;
+    color: var(--muted-2);
+    font-size: 10px;
+  }
+  .history-foot {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 5px;
+    color: var(--muted-2);
+    font-size: 9px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .card-alert {
+    overflow: hidden;
+    margin-top: 8px;
+    color: var(--red);
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: auto;
+    padding-top: 12px;
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .card-footer strong {
+    color: var(--teal);
+    font-weight: 700;
+  }
+  .card-footer span:last-child {
+    color: var(--blue);
+    font-size: 15px;
+    line-height: 1;
+  }
+  .empty-state {
+    grid-column: 1 / -1;
+    border: 1px dashed var(--line-bright);
+    border-radius: 12px;
+    padding: 52px 20px;
+    color: var(--muted);
+    background: rgba(13, 25, 40, .7);
+    text-align: center;
+  }
+  .empty-state strong {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--text);
+    font-size: 15px;
+  }
+  .modal[hidden] { display: none; }
+  .modal {
+    position: fixed;
+    z-index: 20;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+  }
+  .modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(1, 5, 9, .78);
+    backdrop-filter: blur(5px);
+  }
+  .modal-panel {
+    position: relative;
+    display: flex;
+    width: min(100%, 1120px);
+    max-height: min(760px, calc(100vh - 40px));
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--line-bright);
+    border-radius: 15px;
+    background: #151f2c;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .46);
+  }
+  .modal-head, .modal-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 18px 22px;
+  }
+  .modal-head { border-bottom: 1px solid var(--line); }
+  .modal-head h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: 18px;
+  }
+  .modal-head p {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .modal-close {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 8px;
+    color: var(--muted);
+    background: transparent;
+    font-size: 23px;
+    line-height: 1;
+  }
+  .modal-close:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+  .modal-body { overflow: auto; padding: 0 22px; }
+  .detail-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+  }
+  .detail-table th {
+    padding: 13px 10px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 650;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .detail-table td {
+    border-top: 1px solid rgba(48, 71, 95, .7);
+    padding: 13px 10px;
+    color: var(--text);
+    font-size: 12px;
+    vertical-align: middle;
+  }
+  .detail-model { max-width: 300px; }
+  .detail-model strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .detail-model small {
+    display: block;
+    overflow: hidden;
+    margin-top: 4px;
+    color: var(--muted-2);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .detail-status {
+    display: inline-flex;
+    border-radius: 999px;
+    padding: 4px 8px;
+    color: var(--green);
+    background: rgba(42, 124, 73, .18);
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .detail-status.danger { color: var(--red); background: rgba(149, 43, 48, .2); }
+  .detail-number { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .detail-number.good { color: var(--green); }
+  .detail-number.warn { color: var(--amber); }
+  .detail-number.bad { color: var(--red); }
+  .detail-number.muted { color: var(--muted-2); }
+  .modal-foot {
+    justify-content: flex-end;
+    border-top: 1px solid var(--line);
+  }
+  .modal-foot button {
+    min-width: 68px;
+    border: 1px solid var(--line-bright);
+    border-radius: 8px;
+    padding: 8px 13px;
+    color: var(--text);
+    background: rgba(19, 35, 56, .86);
+    font-size: 12px;
+  }
+  body.modal-open { overflow: hidden; }
+  .loading .model-card { opacity: .72; }
+
+  @media (max-width: 1260px) {
+    .model-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 940px) {
+    .shell { width: min(100% - 32px, 760px); }
+    .topbar { align-items: stretch; flex-direction: column; }
+    .topbar-tools { justify-content: flex-start; }
+    .toolbar { align-items: flex-start; flex-direction: column; }
+    .filters { justify-content: flex-start; }
+    .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 600px) {
+    .shell { width: min(100% - 20px, 460px); padding-top: 16px; }
+    .topbar { margin-bottom: 18px; }
+    .period-button { min-width: 47px; padding-right: 7px; padding-left: 7px; }
+    .toolbar-title { align-items: flex-start; flex-direction: column; gap: 4px; }
+    .filters { width: 100%; }
+    .search-box { flex: 1 1 100%; width: auto; }
+    .filter-select { flex: 1 1 0; min-width: 0; }
+    .model-grid { grid-template-columns: 1fr; gap: 14px; }
+    .model-card { min-height: 332px; }
+    .modal { padding: 10px; }
+    .modal-panel { max-height: calc(100vh - 20px); }
+    .modal-head, .modal-foot { padding-right: 14px; padding-left: 14px; }
+    .modal-body { padding-right: 4px; padding-left: 4px; }
+  }
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="模型状态首页">
+      <span class="brand-mark" aria-hidden="true">✦</span>
+      <span>
+        <h1>模型状态</h1>
+        <p>Live availability monitor</p>
+      </span>
+    </a>
+    <div class="topbar-tools">
+      <div class="period-switch" role="tablist" aria-label="统计周期">
+        <button class="period-button active" data-period="1h" type="button" role="tab" aria-selected="true">1小时</button>
+        <button class="period-button" data-period="3h" type="button" role="tab" aria-selected="false">3小时</button>
+        <button class="period-button" data-period="24h" type="button" role="tab" aria-selected="false">24小时</button>
+      </div>
+      <span id="overallHealth" class="health-pill pending"><span class="health-dot"></span><strong>INITIALIZING</strong></span>
+      <button id="refreshButton" class="icon-button" type="button" title="立即刷新" aria-label="立即刷新">↻</button>
+      <span class="refresh-copy">自动刷新: <strong id="refreshCountdown">30s</strong></span>
+      <a class="admin-link" href="/admin" title="打开管理后台">管理 <span aria-hidden="true">→</span></a>
+    </div>
+  </header>
+
+  <section class="toolbar" aria-label="模型筛选">
+    <div class="toolbar-title">
+      <h2>模型状态</h2>
+      <span id="gridSummary">正在加载检测数据</span>
+    </div>
+    <div class="filters">
+      <label class="search-box" title="搜索模型或 API">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="search" placeholder="搜索模型或 API" autocomplete="off">
+      </label>
+      <select id="groupFilter" class="filter-select" aria-label="按分组筛选"><option value="">全部分组</option></select>
+      <select id="statusFilter" class="filter-select" aria-label="按状态筛选">
+        <option value="">全部状态</option>
+        <option value="ok">正常</option>
+        <option value="timeout">超时</option>
+        <option value="error">异常</option>
+      </select>
+    </div>
+  </section>
+
+  <section id="modelGrid" class="model-grid" aria-live="polite">
+    <div class="empty-state"><strong>正在读取模型状态</strong>等待第一次检测结果</div>
+  </section>
+</main>
+
+<div id="groupModal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal-backdrop" data-modal-close></div>
+  <section class="modal-panel">
+    <header class="modal-head">
+      <div>
+        <h2 id="modalTitle">分组详情</h2>
+        <p id="modalMeta"></p>
+      </div>
+      <button id="modalClose" class="modal-close" type="button" title="关闭详情" aria-label="关闭详情">×</button>
+    </header>
+    <div class="modal-body">
+      <table id="detailTable" class="detail-table"></table>
+    </div>
+    <footer class="modal-foot"><button id="modalCloseFooter" type="button">关闭</button></footer>
+  </section>
+</div>
+
+<script>
+const REFRESH_SECONDS = 30;
+const state = {payload: null, period: '1h', loading: false, refreshSeconds: REFRESH_SECONDS, openGroupId: null, lastFocused: null};
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+function finiteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+function formatMs(value) {
+  const number = finiteNumber(value);
+  return number === null ? '--' : String(Math.max(0, Math.round(number)));
+}
+function latencyTone(value) {
+  const number = finiteNumber(value);
+  if (number === null) return 'muted';
+  if (number <= 10000) return 'good';
+  if (number <= 30000) return 'warn';
+  return 'bad';
+}
+function metricHtml(value, tone) {
+  const number = finiteNumber(value);
+  if (number === null) return '<span class="metric-value muted">--</span>';
+  return `<span class="metric-value ${tone}"><strong>${formatMs(number)}</strong><small>ms</small></span>`;
+}
+function availabilityTone(value) {
+  const number = finiteNumber(value);
+  if (number === null) return 'muted';
+  if (number >= 90) return '';
+  if (number >= 75) return 'warn';
+  return 'bad';
+}
+function periodLabel() {
+  return ({'1h': '1小时', '3h': '3小时', '24h': '24小时'})[state.period] || '1小时';
+}
+function currentStat(row) {
+  return row && row.windows && row.windows[state.period] ? row.windows[state.period] : null;
+}
+function statusMeta(row) {
+  if (row && row.status === 'timeout') return {label: '超时', tone: 'danger'};
+  if (row && row.status === 'error') return {label: '异常', tone: 'danger'};
+  return {label: '正常', tone: 'good'};
+}
+function barTone(item) {
+  if (!item) return 'empty';
+  if (item.status === 'timeout' || item.status === 'error') return 'bad';
+  const tone = latencyTone(item.ttft_ms);
+  return tone === 'warn' ? 'warn' : tone === 'bad' ? 'bad' : 'good';
+}
+function barHeight(item) {
+  const tone = barTone(item);
+  if (tone === 'good') return 25;
+  if (tone === 'warn') return 14;
+  if (tone === 'bad') return 7;
+  return 9;
+}
+function historyHtml(items) {
+  const history = Array.isArray(items) ? items.slice(0, 60).reverse() : [];
+  if (!history.length) return '<div class="history-track"><span class="history-empty">等待检测</span></div>';
+  const bars = history.map(item => {
+    const tone = barTone(item);
+    const title = item.status === 'timeout' ? '超时' : item.status === 'error' ? (item.error || '异常') : `${formatMs(item.ttft_ms)}ms`;
+    return `<span class="history-bar ${tone}" style="--bar-height:${barHeight(item)}px" title="${esc(title)}"></span>`;
+  }).join('');
+  return `<div class="history-track">${bars}</div>`;
+}
+function groupRows(payload, group) {
+  return (payload.models || []).filter(row => row.group_id === group.id);
+}
+function defaultRowFor(group, rows) {
+  const reference = group.default_model;
+  if (reference) {
+    const configured = rows.find(row => row.endpoint_id === reference.endpoint_id && row.model === reference.model_id);
+    if (configured) return configured;
+  }
+  return rows[0] || null;
+}
+function cardHtml(group, rows) {
+  const row = defaultRowFor(group, rows);
+  const meta = row ? statusMeta(row) : {label: '等待', tone: 'pending'};
+  const stat = row ? (currentStat(row) || {}) : ((group.windows && group.windows[state.period]) || {});
+  const availability = finiteNumber(stat.availability);
+  const availabilityText = availability === null ? '--' : `${availability.toFixed(2)}%`;
+  const errorTitle = row && (row.error || (meta.tone === 'danger' ? meta.label : ''));
+  const cardClass = meta.tone === 'danger' ? 'model-card group-card has-error' : 'model-card group-card';
+  const defaultLabel = row ? `${row.endpoint_name || 'API'} / ${row.model || '未知模型'}` : '尚未发现模型';
+  return `<article class="${cardClass}" data-group-id="${esc(group.id)}" tabindex="0" role="button" aria-label="打开${esc(group.name)}分组详情" title="${esc(errorTitle || '查看分组详情')}">
+    <div class="card-head">
+      <div class="identity">
+        <span class="model-mark" aria-hidden="true">✦</span>
+        <div class="identity-copy">
+          <div class="group-label">${esc(group.description || `${rows.length} 个模型`)}</div>
+          <h2>${esc(group.name || '未命名分组')}</h2>
+          <div class="model-line"><span class="api-badge">默认</span><span class="model-id" title="${esc(defaultLabel)}">${esc(defaultLabel)}</span></div>
+        </div>
+      </div>
+      <span class="state-badge ${meta.tone === 'danger' ? 'danger' : meta.tone === 'pending' ? 'pending' : ''}">${meta.label}</span>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric">
+        <div class="metric-label"><span class="metric-icon" aria-hidden="true">↯</span>响应延迟</div>
+        ${metricHtml(row && row.ttft_ms, latencyTone(row && row.ttft_ms))}
+      </div>
+      <div class="metric">
+        <div class="metric-label"><span class="metric-icon" aria-hidden="true">⊙</span>端点 PING</div>
+        ${metricHtml(row && row.endpoint_ping_ms, latencyTone(row && row.endpoint_ping_ms))}
+      </div>
+    </div>
+
+    <div class="availability">
+      <div>
+        <div class="availability-label">可用性 · ${periodLabel()}</div>
+        <div class="availability-count">${stat.ok ?? 0} / ${stat.total ?? 0} 次成功</div>
+      </div>
+      <strong class="availability-value ${availabilityTone(availability)}">${availabilityText}</strong>
+    </div>
+
+    <div class="history">
+      <div class="history-head"><span>近 60 次记录</span><strong>${esc(row ? (row.checked_at || '尚未检测') : '尚未检测')}</strong></div>
+      ${historyHtml(row ? row.recent_results : [])}
+      <div class="history-foot"><span>past</span><span>now</span></div>
+    </div>
+    ${meta.tone === 'danger' && row && row.error ? `<div class="card-alert">${esc(row.error)}</div>` : ''}
+    <div class="card-footer"><strong>${rows.length ? `查看全部 ${rows.length} 个模型` : '暂无检测模型'}</strong><span aria-hidden="true">→</span></div>
+  </article>`;
+}
+function fillFilters(payload) {
+  const select = document.getElementById('groupFilter');
+  const current = select.value;
+  const groups = Array.isArray(payload.groups) ? payload.groups : [];
+  select.innerHTML = '<option value="">全部分组</option>' + groups.map(group => `<option value="${esc(group.id)}">${esc(group.name)}</option>`).join('');
+  select.value = groups.some(group => group.id === current) ? current : '';
+}
+function rowMatchesStatus(row, status) {
+  if (!status) return true;
+  if (status === 'ok') return ['ok', 'fluctuation'].includes(row.status);
+  return row.status === status;
+}
+function rowMatchesSearch(row, search) {
+  return `${row.group_name || ''} ${row.endpoint_name || ''} ${row.model || ''}`.toLowerCase().includes(search);
+}
+function visibleGroups(payload) {
+  const search = document.getElementById('search').value.trim().toLowerCase();
+  const groupId = document.getElementById('groupFilter').value;
+  const status = document.getElementById('statusFilter').value;
+  return (payload.groups || []).map(group => {
+    const rows = groupRows(payload, group);
+    return {group, rows};
+  }).filter(item => {
+    const {group, rows} = item;
+    if (group.enabled === false) return false;
+    if (groupId && group.id !== groupId) return false;
+    if (status && !rows.some(row => rowMatchesStatus(row, status))) return false;
+    if (!search) return true;
+    const groupText = `${group.name || ''} ${group.description || ''}`.toLowerCase();
+    return groupText.includes(search) || rows.some(row => rowMatchesSearch(row, search));
+  });
+}
+function renderHealth(payload) {
+  const current = payload.summary && payload.summary.current ? payload.summary.current : {};
+  const el = document.getElementById('overallHealth');
+  let label = 'INITIALIZING';
+  let tone = 'pending';
+  if (current.total) {
+    label = current.error ? 'DEGRADED' : 'OPERATIONAL';
+    tone = current.error ? 'degraded' : '';
+  }
+  el.className = `health-pill ${tone}`;
+  el.querySelector('strong').textContent = label;
+}
+function detailNumber(value, tone='muted') {
+  const number = finiteNumber(value);
+  return `<span class="detail-number ${number === null ? 'muted' : tone}">${number === null ? '--' : formatMs(number)}${number === null ? '' : 'ms'}</span>`;
+}
+function detailAvailability(row) {
+  const stat = currentStat(row) || {};
+  const value = finiteNumber(stat.availability);
+  return `<span class="detail-number ${availabilityTone(value)}">${value === null ? '--' : `${value.toFixed(2)}%`}</span>`;
+}
+function detailTableHtml(rows) {
+  const body = rows.length ? rows.map(row => {
+    const meta = statusMeta(row);
+    return `<tr title="${esc(row.error || '')}">
+      <td class="detail-model"><strong>${esc(row.model || '未知模型')}</strong><small>${esc(row.endpoint_name || '未命名 API')}</small></td>
+      <td><span class="detail-status ${meta.tone === 'danger' ? 'danger' : ''}">${meta.label}</span></td>
+      <td>${detailNumber(row.ttft_ms, latencyTone(row.ttft_ms))}</td>
+      <td>${detailNumber(row.endpoint_ping_ms, latencyTone(row.endpoint_ping_ms))}</td>
+      <td>${detailAvailability(row)}</td>
+      <td class="detail-number">${esc(row.checked_at || '--')}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="6" class="muted">该分组尚未发现可监控模型</td></tr>';
+  return `<thead><tr><th>模型</th><th>最新状态</th><th>最新延迟（ms）</th><th>端点 PING（ms）</th><th>${periodLabel()}可用率</th><th>最近检测</th></tr></thead><tbody>${body}</tbody>`;
+}
+function renderGroupModal(group, rows) {
+  const defaultRow = defaultRowFor(group, rows);
+  document.getElementById('modalTitle').textContent = group.name || '分组详情';
+  document.getElementById('modalMeta').textContent = `${rows.length} 个模型 · 默认显示 ${defaultRow ? defaultRow.model : '自动选择第一个'}`;
+  document.getElementById('detailTable').innerHTML = detailTableHtml(rows);
+}
+function openGroupModal(groupId) {
+  const payload = state.payload;
+  const group = payload && (payload.groups || []).find(item => item.id === groupId);
+  if (!group) return;
+  state.openGroupId = groupId;
+  state.lastFocused = document.activeElement;
+  renderGroupModal(group, groupRows(payload, group));
+  document.getElementById('groupModal').hidden = false;
+  document.body.classList.add('modal-open');
+  document.getElementById('modalClose').focus();
+}
+function closeGroupModal(restoreFocus=true) {
+  state.openGroupId = null;
+  document.getElementById('groupModal').hidden = true;
+  document.body.classList.remove('modal-open');
+  if (restoreFocus && state.lastFocused && document.contains(state.lastFocused)) state.lastFocused.focus();
+  state.lastFocused = null;
+}
+function bindGroupCards() {
+  document.querySelectorAll('.group-card').forEach(card => {
+    const open = () => openGroupModal(card.dataset.groupId);
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        open();
+      }
+    });
+  });
+}
+function render(payload) {
+  state.payload = payload;
+  fillFilters(payload);
+  const groups = visibleGroups(payload);
+  const totalGroups = (payload.groups || []).length;
+  const totalModels = (payload.models || []).length;
+  document.getElementById('gridSummary').textContent = `${groups.length} / ${totalGroups} 个分组 · ${totalModels} 个模型 · 最近更新 ${payload.service.last_check_finished_at || '等待中'}`;
+  renderHealth(payload);
+  const grid = document.getElementById('modelGrid');
+  grid.classList.toggle('loading', Boolean(payload.service.check_running));
+  grid.innerHTML = groups.length
+    ? groups.map(item => cardHtml(item.group, item.rows)).join('')
+    : '<div class="empty-state"><strong>没有匹配的分组</strong>调整筛选条件后重试</div>';
+  bindGroupCards();
+  if (state.openGroupId) {
+    const openGroup = (payload.groups || []).find(group => group.id === state.openGroupId);
+    if (openGroup) renderGroupModal(openGroup, groupRows(payload, openGroup));
+    else closeGroupModal(false);
+  }
+}
+async function load() {
+  if (state.loading) return;
+  state.loading = true;
+  try {
+    const res = await fetch('/api/dashboard', {cache: 'no-store'});
+    if (!res.ok) throw new Error(await res.text());
+    render(await res.json());
+    state.refreshSeconds = REFRESH_SECONDS;
+  } catch (error) {
+    document.getElementById('modelGrid').innerHTML = `<div class="empty-state"><strong>加载失败</strong>${esc(error.message)}</div>`;
+    document.getElementById('overallHealth').className = 'health-pill degraded';
+    document.getElementById('overallHealth').querySelector('strong').textContent = 'OFFLINE';
+  } finally {
+    state.loading = false;
+  }
+}
+document.querySelectorAll('.period-button').forEach(button => button.addEventListener('click', () => {
+  state.period = button.dataset.period;
+  document.querySelectorAll('.period-button').forEach(item => {
+    const active = item === button;
+    item.classList.toggle('active', active);
+    item.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  if (state.payload) render(state.payload);
+}));
+['search', 'groupFilter', 'statusFilter'].forEach(id => {
+  document.getElementById(id).addEventListener(id === 'search' ? 'input' : 'change', () => state.payload && render(state.payload));
+});
+document.getElementById('modalClose').addEventListener('click', () => closeGroupModal());
+document.getElementById('modalCloseFooter').addEventListener('click', () => closeGroupModal());
+document.querySelectorAll('[data-modal-close]').forEach(element => element.addEventListener('click', () => closeGroupModal()));
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && state.openGroupId) closeGroupModal();
+});
+document.getElementById('refreshButton').addEventListener('click', () => load());
+setInterval(() => {
+  state.refreshSeconds = Math.max(0, state.refreshSeconds - 1);
+  document.getElementById('refreshCountdown').textContent = `${state.refreshSeconds}s`;
+  if (state.refreshSeconds === 0) load();
+}, 1000);
+load();
+</script>
+</body>
+</html>

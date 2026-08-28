@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.0
+
+- Replaced the Python runtime with a statically linked Go backend.
+- Kept the existing HTTP API, config format, SQLite history, dashboard, and admin UI.
+- Reimplemented OpenAI-compatible streaming checks, retries, Responses fallback, and fresh upstream connections in Go.
+- Reimplemented QQ scheduled pushes, @ replies, duplicate-message protection, and group binding in Go.
+- Switched Docker to a multi-stage Go build with an Alpine runtime image.
+
 ## v2.0.0
 
 - Grouped the dashboard into one card per model group.
