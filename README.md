@@ -1,4 +1,4 @@
-# Model Monitor v3.0
+# Model Monitor v3.0.1
 
 OpenAI-compatible model availability monitor with a lightweight Go backend.
 It keeps the grouped dashboard, per-group default display models, response
@@ -30,10 +30,10 @@ that directory or `.env`.
 ## GHCR
 
 ```bash
-docker pull ghcr.io/ai8888-shop/model-monitor:v3.0
+docker pull ghcr.io/ai8888-shop/model-monitor:v3.0.1
 ```
 
-The image also has `3.0.0` and `latest` tags. The GHCR package must be set to
+The image also has `3.0.1` and `latest` tags. The GHCR package must be set to
 public in its package settings before anonymous pulls are allowed.
 
 ## Development

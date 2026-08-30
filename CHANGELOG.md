@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.1
+
+- Bound each group history chart directly to its configured default display model.
+- Prevented a missing default-model result from silently showing another model's history.
+- Added the active model name to each history chart and automated GitHub releases with multi-architecture GHCR images.
+
 ## v3.0.0
 
 - Replaced the Python runtime with a statically linked Go backend.

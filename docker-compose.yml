@@ -1,6 +1,6 @@
 services:
   model-monitor:
-    image: model-monitor:3.0.0
+    image: model-monitor:3.0.1
     build:
       context: .
       dockerfile: Dockerfile

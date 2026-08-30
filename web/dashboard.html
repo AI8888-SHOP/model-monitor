@@ -478,6 +478,12 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
+  .history-head > span {
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .history-track {
     display: flex;
     align-items: flex-end;
@@ -833,24 +839,30 @@ function barHeight(item) {
   if (tone === 'bad') return 7;
   return 9;
 }
-function historyHtml(items) {
+function historyHtml(items, row) {
   const history = Array.isArray(items) ? items.slice(0, 60).reverse() : [];
-  if (!history.length) return '<div class="history-track"><span class="history-empty">等待检测</span></div>';
+  const endpointId = row && row.endpoint_id ? row.endpoint_id : '';
+  const modelId = row && row.model ? row.model : '';
+  if (!history.length) return `<div class="history-track" data-endpoint-id="${esc(endpointId)}" data-model-id="${esc(modelId)}"><span class="history-empty">等待检测</span></div>`;
   const bars = history.map(item => {
     const tone = barTone(item);
     const title = item.status === 'timeout' ? '超时' : item.status === 'error' ? (item.error || '异常') : `${formatMs(item.ttft_ms)}ms`;
     return `<span class="history-bar ${tone}" style="--bar-height:${barHeight(item)}px" title="${esc(title)}"></span>`;
   }).join('');
-  return `<div class="history-track">${bars}</div>`;
+  return `<div class="history-track" data-endpoint-id="${esc(endpointId)}" data-model-id="${esc(modelId)}" aria-label="${esc(modelId)} 最近 ${history.length} 次检测记录">${bars}</div>`;
 }
 function groupRows(payload, group) {
   return (payload.models || []).filter(row => row.group_id === group.id);
 }
 function defaultRowFor(group, rows) {
+  if (Object.prototype.hasOwnProperty.call(group, 'display_model')) {
+    return group.display_model || null;
+  }
   const reference = group.default_model;
   if (reference) {
     const configured = rows.find(row => row.endpoint_id === reference.endpoint_id && row.model === reference.model_id);
     if (configured) return configured;
+    return null;
   }
   return rows[0] || null;
 }
@@ -896,8 +908,8 @@ function cardHtml(group, rows) {
     </div>
 
     <div class="history">
-      <div class="history-head"><span>近 60 次记录</span><strong>${esc(row ? (row.checked_at || '尚未检测') : '尚未检测')}</strong></div>
-      ${historyHtml(row ? row.recent_results : [])}
+      <div class="history-head"><span title="${esc(row ? row.model : '')}">近 60 次 · ${esc(row ? row.model : '等待模型')}</span><strong>${esc(row ? (row.checked_at || '尚未检测') : '尚未检测')}</strong></div>
+      ${historyHtml(row ? row.recent_results : [], row)}
       <div class="history-foot"><span>past</span><span>now</span></div>
     </div>
     ${meta.tone === 'danger' && row && row.error ? `<div class="card-alert">${esc(row.error)}</div>` : ''}

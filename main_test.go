@@ -192,6 +192,50 @@ func TestDashboardUsesSQLiteHistory(t *testing.T) {
 	}
 }
 
+func TestDashboardDisplayModelControlsHistory(t *testing.T) {
+	monitor := testMonitor(t)
+	config := monitor.snapshotConfig()
+	endpoint, group := config.Endpoints[0], config.Groups[0]
+	config.Groups[0].DefaultModel = &ModelRef{EndpointID: endpoint.ID, ModelID: "selected"}
+	monitor.configMu.Lock()
+	monitor.config = config
+	monitor.configMu.Unlock()
+
+	checkedAt := nowUnix()
+	selectedTTFT, otherTTFT := 125.0, 12_500.0
+	selected := Record{
+		EndpointID: endpoint.ID, EndpointName: endpoint.Name, GroupID: group.ID, GroupName: group.Name,
+		Model: "selected", Status: "ok", TTFTMs: &selectedTTFT, CheckedAt: formatTimeString(checkedAt), CheckedAtTS: checkedAt,
+	}
+	other := Record{
+		EndpointID: endpoint.ID, EndpointName: endpoint.Name, GroupID: group.ID, GroupName: group.Name,
+		Model: "other", Status: "fluctuation", TTFTMs: &otherTTFT, CheckedAt: formatTimeString(checkedAt - 0.1), CheckedAtTS: checkedAt - 0.1,
+	}
+	monitor.stateMu.Lock()
+	monitor.latestResults[modelKey(endpoint.ID, selected.Model)] = selected
+	monitor.latestResults[modelKey(endpoint.ID, other.Model)] = other
+	monitor.knownModels[endpoint.ID] = []string{other.Model, selected.Model}
+	monitor.historyValidAfter = checkedAt - 1
+	monitor.stateMu.Unlock()
+	if err := monitor.insertHistory([]Record{other, selected}); err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := monitor.buildDashboardPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := payload["groups"].([]map[string]any)
+	display := groups[0]["display_model"].(map[string]any)
+	if display["model"] != selected.Model {
+		t.Fatalf("display model = %q, want %q", display["model"], selected.Model)
+	}
+	recent := display["recent_results"].([]any)
+	if len(recent) != 1 || recent[0].(recentResult).Status != selected.Status {
+		t.Fatalf("display history = %#v, want only selected model history", recent)
+	}
+}
+
 func TestEmptyDatabaseDashboardIsAvailable(t *testing.T) {
 	monitor := testMonitor(t)
 	monitor.stateMu.Lock()

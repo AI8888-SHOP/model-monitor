@@ -2197,6 +2197,23 @@ func publicEndpoint(endpoint Endpoint) map[string]any {
 	}
 }
 
+func dashboardDisplayModel(group Group, rows []map[string]any) map[string]any {
+	if group.DefaultModel != nil {
+		for _, row := range rows {
+			if stringValue(row["endpoint_id"]) == group.DefaultModel.EndpointID && stringValue(row["model"]) == group.DefaultModel.ModelID {
+				return row
+			}
+		}
+		return nil
+	}
+	for _, row := range rows {
+		if stringValue(row["group_id"]) == group.ID {
+			return row
+		}
+	}
+	return nil
+}
+
 func (m *Monitor) buildDashboardPayload() (map[string]any, error) {
 	snapshot := m.snapshotConfig()
 	latest, known, endpointErrors, pings, started, finished, running, validAfter := m.stateSnapshot()
@@ -2301,7 +2318,8 @@ func (m *Monitor) buildDashboardPayload() (map[string]any, error) {
 		groupPayload = append(groupPayload, map[string]any{
 			"id": group.ID, "name": group.Name, "description": group.Description, "enabled": group.Enabled,
 			"check_interval": group.CheckInterval, "timeout": group.Timeout, "default_model": group.DefaultModel,
-			"current": countRecords(groupRecords), "windows": groupedWindowPayload(groupWindows, group.ID),
+			"display_model": dashboardDisplayModel(group, rows),
+			"current":       countRecords(groupRecords), "windows": groupedWindowPayload(groupWindows, group.ID),
 		})
 	}
 	endpointPayload := []map[string]any{}
