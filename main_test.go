@@ -114,6 +114,12 @@ func TestDashboardHidesAdminShortcut(t *testing.T) {
 	}
 }
 
+func TestStatusFromErrorAcceptsPunctuation(t *testing.T) {
+	if status := statusFromError("HTTP 404: Responses: not found"); status != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", status, http.StatusNotFound)
+	}
+}
+
 func TestAdminViewRedactsQQSecrets(t *testing.T) {
 	config := defaultConfig()
 	config.QQPush.AppSecret = "secret"

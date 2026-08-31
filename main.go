@@ -1340,7 +1340,8 @@ func statusFromError(message string) int {
 	if len(parts) < 2 {
 		return 0
 	}
-	status, _ := strconv.Atoi(parts[1])
+	statusText := strings.TrimRight(parts[1], ":;,.")
+	status, _ := strconv.Atoi(statusText)
 	return status
 }
 
