@@ -41,6 +41,7 @@ var adminPage string
 const (
 	defaultListenHost            = "0.0.0.0"
 	defaultListenPort            = 8020
+	defaultGroupIcon             = "openai"
 	defaultCheckInterval         = 60
 	defaultTimeout               = 180
 	defaultMaxWorkers            = 16
@@ -50,6 +51,8 @@ const (
 	modelRetryDelay              = 500 * time.Millisecond
 	maxHTTPRetryAttempts         = 3
 	maxHTTPRetryDelay            = 5 * time.Second
+	rateCacheTTL                 = 30 * time.Second
+	responsesFallbackTimeout     = 10 * time.Second
 	qqMentionDedupWindow         = 10 * time.Minute
 	maxRequestBody               = 2 * 1024 * 1024
 	maxQQMessageLength           = 4000
@@ -59,6 +62,7 @@ const (
 var (
 	timezoneCN = time.FixedZone("Asia/Shanghai", 8*60*60)
 	idPattern  = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+	groupIcons = map[string]bool{"openai": true, "grok": true, "gemini": true, "claude": true}
 )
 
 type ModelRef struct {
@@ -70,6 +74,7 @@ type Group struct {
 	ID            string    `json:"id"`
 	Name          string    `json:"name"`
 	Description   string    `json:"description"`
+	Icon          string    `json:"icon"`
 	Enabled       bool      `json:"enabled"`
 	CheckInterval int       `json:"check_interval"`
 	Timeout       int       `json:"timeout"`
@@ -121,6 +126,7 @@ type Record struct {
 	CheckedAt       string   `json:"checked_at"`
 	CheckedAtTS     float64  `json:"checked_at_ts"`
 	ProbeProtocol   string   `json:"probe_protocol,omitempty"`
+	RateMultiplier  *float64 `json:"rate_multiplier,omitempty"`
 	EndpointPingMs  *float64 `json:"endpoint_ping_ms,omitempty"`
 }
 
@@ -194,11 +200,18 @@ type Monitor struct {
 	qqToken       string
 	qqTokenExp    time.Time
 	qqTokenID     string
+	rateMu        sync.Mutex
+	rateCache     map[string]rateCacheEntry
 
 	qqCaptureMu     sync.Mutex
 	qqCaptureCancel context.CancelFunc
 	qqMentionSeenMu sync.Mutex
 	qqMentionSeen   map[string]time.Time
+}
+
+type rateCacheEntry struct {
+	value     *float64
+	expiresAt time.Time
 }
 
 type checkTask struct {
@@ -334,6 +347,14 @@ func normalizeBaseURL(value any) string {
 	return strings.TrimRight(raw, "/")
 }
 
+func normalizeGroupIcon(value any) string {
+	icon := strings.ToLower(stringValue(value))
+	if groupIcons[icon] {
+		return icon
+	}
+	return defaultGroupIcon
+}
+
 func formatTime(timestamp float64) any {
 	if timestamp <= 0 {
 		return nil
@@ -396,6 +417,7 @@ func defaultConfig() Config {
 		Groups: []Group{{
 			ID:            groupID,
 			Name:          firstNonEmpty(os.Getenv("DEFAULT_GROUP_NAME"), "默认分组"),
+			Icon:          defaultGroupIcon,
 			Enabled:       true,
 			CheckInterval: envInt("CHECK_INTERVAL", defaultCheckInterval),
 			Timeout:       envInt("TIMEOUT", defaultTimeout),
@@ -494,6 +516,7 @@ func normalizeConfig(raw map[string]any) Config {
 			ID:            id,
 			Name:          name,
 			Description:   description,
+			Icon:          normalizeGroupIcon(group["icon"]),
 			Enabled:       boolValue(group["enabled"], true),
 			CheckInterval: clamp(intValue(group["check_interval"], globalInterval), globalInterval, 10, 86400),
 			Timeout:       clamp(intValue(group["timeout"], timeoutFallback), defaultTimeout, 5, 600),
@@ -668,6 +691,7 @@ func newMonitor() *Monitor {
 		endpointPingMs:  map[string]float64{},
 		groupResetAfter: map[string]float64{},
 		qqMentionSeen:   map[string]time.Time{},
+		rateCache:       map[string]rateCacheEntry{},
 		qqRuntime: qqRuntime{
 			CaptureStatus:  "idle",
 			CaptureMessage: "尚未开始绑定",
@@ -824,6 +848,7 @@ func (m *Monitor) initDB() error {
 			model_id TEXT NOT NULL,
 			status TEXT NOT NULL,
 			ttft_ms REAL,
+			rate_multiplier REAL,
 			error TEXT,
 			checked_at REAL NOT NULL
 		)`,
@@ -838,8 +863,41 @@ func (m *Monitor) initDB() error {
 			return err
 		}
 	}
+	if err := ensureSQLiteColumn(db, "checks", "rate_multiplier", "REAL"); err != nil {
+		_ = db.Close()
+		return err
+	}
 	m.db = db
 	return nil
+}
+
+func ensureSQLiteColumn(db *sql.DB, table, column, definition string) error {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == column {
+			rows.Close()
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	_, err = db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition)
+	return err
 }
 
 func (m *Monitor) wakeScheduler(refresh, force bool) {
@@ -886,8 +944,8 @@ func (m *Monitor) insertHistory(records []Record) error {
 	}
 	stmt, err := tx.Prepare(`INSERT INTO checks (
 		endpoint_id, endpoint_name, group_id, group_name, model_id,
-		status, ttft_ms, error, checked_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		status, ttft_ms, rate_multiplier, error, checked_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -898,13 +956,17 @@ func (m *Monitor) insertHistory(records []Record) error {
 		if record.TTFTMs != nil {
 			ttft = *record.TTFTMs
 		}
+		var rateMultiplier any
+		if record.RateMultiplier != nil {
+			rateMultiplier = *record.RateMultiplier
+		}
 		var probeError any
 		if record.Error != "" {
 			probeError = record.Error
 		}
 		if _, err := stmt.Exec(
 			record.EndpointID, record.EndpointName, record.GroupID, record.GroupName,
-			record.Model, record.Status, ttft, probeError, record.CheckedAtTS,
+			record.Model, record.Status, ttft, rateMultiplier, probeError, record.CheckedAtTS,
 		); err != nil {
 			_ = tx.Rollback()
 			return err
@@ -1088,24 +1150,25 @@ func (m *Monitor) queryGroupedWindows(fields []string, endpointIDs map[string]bo
 }
 
 type recentResult struct {
-	Status    string   `json:"status"`
-	TTFTMs    *float64 `json:"ttft_ms"`
-	Error     string   `json:"error,omitempty"`
-	CheckedAt any      `json:"checked_at"`
+	Status         string   `json:"status"`
+	TTFTMs         *float64 `json:"ttft_ms"`
+	RateMultiplier *float64 `json:"rate_multiplier,omitempty"`
+	Error          string   `json:"error,omitempty"`
+	CheckedAt      any      `json:"checked_at"`
 }
 
 func (m *Monitor) queryRecentModelResults(endpointIDs map[string]bool, ignored map[string]bool, limit int, validAfter float64) (map[string][]recentResult, error) {
 	output := map[string][]recentResult{}
 	filter, params := m.historyFilter(endpointIDs, ignored, validAfter)
-	rows, err := m.db.Query("SELECT endpoint_id, model_id, status, ttft_ms, error, checked_at FROM checks WHERE 1 = 1"+filter+" ORDER BY checked_at DESC", params...)
+	rows, err := m.db.Query("SELECT endpoint_id, model_id, status, ttft_ms, rate_multiplier, error, checked_at FROM checks WHERE 1 = 1"+filter+" ORDER BY checked_at DESC", params...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var endpointID, modelID, status string
-		var ttft, probeError, checkedAt any
-		if err := rows.Scan(&endpointID, &modelID, &status, &ttft, &probeError, &checkedAt); err != nil {
+		var ttft, rateMultiplier, probeError, checkedAt any
+		if err := rows.Scan(&endpointID, &modelID, &status, &ttft, &rateMultiplier, &probeError, &checkedAt); err != nil {
 			return nil, err
 		}
 		key := modelKey(endpointID, modelID)
@@ -1117,7 +1180,9 @@ func (m *Monitor) queryRecentModelResults(endpointIDs map[string]bool, ignored m
 			errorText = fmt.Sprint(probeError)
 		}
 		output[key] = append(output[key], recentResult{
-			Status: status, TTFTMs: roundPointer(scanNullableFloat(ttft), 1), Error: errorText, CheckedAt: formatTime(floatValue(checkedAt)),
+			Status: status, TTFTMs: roundPointer(scanNullableFloat(ttft), 1),
+			RateMultiplier: roundPointer(scanNullableFloat(rateMultiplier), 4), Error: errorText,
+			CheckedAt: formatTime(floatValue(checkedAt)),
 		})
 	}
 	return output, rows.Err()
@@ -1267,10 +1332,11 @@ func isRetryableStatus(status int) bool {
 
 func statusFromError(message string) int {
 	message = strings.TrimSpace(message)
-	if !strings.HasPrefix(message, "HTTP ") {
+	index := strings.Index(message, "HTTP ")
+	if index < 0 {
 		return 0
 	}
-	parts := strings.Fields(message)
+	parts := strings.Fields(message[index:])
 	if len(parts) < 2 {
 		return 0
 	}
@@ -1299,6 +1365,207 @@ func extractErrorMessage(payload map[string]any) string {
 		return strings.TrimSpace(message)
 	}
 	return stringValue(payload["message"])
+}
+
+func numberValue(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case json.Number:
+		parsed, err := typed.Float64()
+		return parsed, err == nil
+	case string:
+		raw := strings.TrimSpace(typed)
+		if strings.HasSuffix(strings.ToLower(raw), "x") {
+			raw = strings.TrimSpace(raw[:len(raw)-1])
+		}
+		parsed, err := strconv.ParseFloat(raw, 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func rateMultiplierValue(value any) *float64 {
+	parsed, ok := numberValue(value)
+	if !ok || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 {
+		return nil
+	}
+	parsed = roundFloat(parsed, 4)
+	return &parsed
+}
+
+func rateMultiplierFromPayload(payload map[string]any) *float64 {
+	if payload == nil {
+		return nil
+	}
+	keys := []string{
+		"effective_rate_multiplier",
+		"resolved_rate_multiplier",
+		"rate_multiplier",
+		"effectiveRateMultiplier",
+		"resolvedRateMultiplier",
+		"rateMultiplier",
+	}
+	for _, key := range keys {
+		if value := rateMultiplierValue(payload[key]); value != nil {
+			return value
+		}
+	}
+	for _, value := range payload {
+		if nested := mapValue(value); nested != nil {
+			if multiplier := rateMultiplierFromPayload(nested); multiplier != nil {
+				return multiplier
+			}
+		}
+		for _, item := range sliceValue(value) {
+			if nested := mapValue(item); nested != nil {
+				if multiplier := rateMultiplierFromPayload(nested); multiplier != nil {
+					return multiplier
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func rateMultiplierFromHeaders(headers http.Header) *float64 {
+	if headers == nil {
+		return nil
+	}
+	known := []string{
+		"Rate-Multiplier",
+		"Effective-Rate-Multiplier",
+		"Resolved-Rate-Multiplier",
+		"X-Rate-Multiplier",
+		"X-Effective-Rate-Multiplier",
+		"X-Resolved-Rate-Multiplier",
+		"X-Sub2API-Rate-Multiplier",
+	}
+	for _, key := range known {
+		if value := rateMultiplierValue(headers.Get(key)); value != nil {
+			return value
+		}
+	}
+	for key, values := range headers {
+		lower := strings.ToLower(key)
+		if (!strings.Contains(lower, "rate") && !strings.Contains(lower, "billing")) || !strings.Contains(lower, "multiplier") {
+			continue
+		}
+		for _, raw := range values {
+			if value := rateMultiplierValue(raw); value != nil {
+				return value
+			}
+		}
+	}
+	return nil
+}
+
+func firstNonNilRate(values ...*float64) *float64 {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func cloneFloatPointer(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	copyValue := *value
+	return &copyValue
+}
+
+func rateCacheKey(endpoint Endpoint) string {
+	return endpoint.ID + "|" + endpoint.BaseURL
+}
+
+func (m *Monitor) cachedRateMultiplier(endpoint Endpoint) (*float64, bool) {
+	now := time.Now()
+	key := rateCacheKey(endpoint)
+	m.rateMu.Lock()
+	defer m.rateMu.Unlock()
+	entry, ok := m.rateCache[key]
+	if !ok {
+		return nil, false
+	}
+	if !entry.expiresAt.After(now) {
+		delete(m.rateCache, key)
+		return nil, false
+	}
+	return cloneFloatPointer(entry.value), true
+}
+
+func (m *Monitor) cacheRateMultiplier(endpoint Endpoint, value *float64) {
+	m.rateMu.Lock()
+	if m.rateCache == nil {
+		m.rateCache = map[string]rateCacheEntry{}
+	}
+	m.rateCache[rateCacheKey(endpoint)] = rateCacheEntry{
+		value:     cloneFloatPointer(value),
+		expiresAt: time.Now().Add(rateCacheTTL),
+	}
+	m.rateMu.Unlock()
+}
+
+func (m *Monitor) fetchBillingRate(ctx context.Context, endpoint Endpoint) *float64 {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if value, ok := m.cachedRateMultiplier(endpoint); ok {
+		return value
+	}
+	target, err := openAIURL(endpoint.BaseURL, "/sub2api/billing")
+	if err != nil {
+		return nil
+	}
+	billingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(billingCtx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil
+	}
+	for key, values := range endpointHeaders(endpoint, "application/json") {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	req.Close = true
+	resp, err := probeHTTPClient.Do(req)
+	if err != nil {
+		m.cacheRateMultiplier(endpoint, nil)
+		return nil
+	}
+	defer resp.Body.Close()
+	body, err := readBodyLimit(resp.Body, 256*1024)
+	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		m.cacheRateMultiplier(endpoint, nil)
+		return nil
+	}
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		m.cacheRateMultiplier(endpoint, nil)
+		return nil
+	}
+	value := rateMultiplierFromPayload(payload)
+	m.cacheRateMultiplier(endpoint, value)
+	return cloneFloatPointer(value)
+}
+
+func (m *Monitor) resolveRateMultiplier(ctx context.Context, endpoint Endpoint, direct *float64) *float64 {
+	if direct != nil {
+		m.cacheRateMultiplier(endpoint, direct)
+		return cloneFloatPointer(direct)
+	}
+	return m.fetchBillingRate(ctx, endpoint)
 }
 
 func firstOutputInChoice(choice map[string]any) bool {
@@ -1430,10 +1697,11 @@ func responsesStreamOutput(eventName string, payload map[string]any) bool {
 }
 
 type probeAttempt struct {
-	Success   bool
-	Retryable bool
-	Elapsed   float64
-	Error     string
+	Success        bool
+	Retryable      bool
+	Elapsed        float64
+	RateMultiplier *float64
+	Error          string
 }
 
 func elapsedMs(started time.Time) float64 {
@@ -1486,7 +1754,7 @@ func (m *Monitor) chatNonStream(ctx context.Context, endpoint Endpoint, requestB
 		return probeAttempt{Retryable: true, Elapsed: elapsedMs(started), Error: "响应 JSON 无效：" + truncateError(err.Error())}
 	}
 	if chatChoicesContainOutput(payload, false) {
-		return probeAttempt{Success: true, Elapsed: elapsedMs(started)}
+		return probeAttempt{Success: true, Elapsed: elapsedMs(started), RateMultiplier: firstNonNilRate(rateMultiplierFromHeaders(resp.Header), rateMultiplierFromPayload(payload))}
 	}
 	errorText := firstNonEmpty(extractErrorMessage(payload), "non-stream response missing assistant message")
 	return probeAttempt{Retryable: true, Elapsed: elapsedMs(started), Error: truncateError(errorText)}
@@ -1513,6 +1781,7 @@ func (m *Monitor) chatAttempt(ctx context.Context, endpoint Endpoint, requestBod
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 	streamError := ""
 	found := false
+	var responseRate *float64
 	if strings.Contains(contentType, "text/event-stream") || contentType == "" {
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 4096), 512*1024)
@@ -1535,6 +1804,7 @@ func (m *Monitor) chatAttempt(ctx context.Context, endpoint Endpoint, requestBod
 				eventName = ""
 				continue
 			}
+			responseRate = firstNonNilRate(responseRate, rateMultiplierFromPayload(payload))
 			if errorText := extractErrorMessage(payload); errorText != "" || strings.EqualFold(eventName, "error") {
 				streamError = firstNonEmpty(errorText, "SSE event: "+eventName)
 				break
@@ -1554,16 +1824,20 @@ func (m *Monitor) chatAttempt(ctx context.Context, endpoint Endpoint, requestBod
 		resp.Body.Close()
 		if readErr == nil {
 			var payload map[string]any
-			if json.Unmarshal(raw, &payload) == nil && chatChoicesContainOutput(payload, false) {
-				found = true
+			if json.Unmarshal(raw, &payload) == nil {
+				responseRate = firstNonNilRate(responseRate, rateMultiplierFromPayload(payload))
+				if chatChoicesContainOutput(payload, false) {
+					found = true
+				}
 			}
 		}
 	}
 	if found {
-		return probeAttempt{Success: true, Elapsed: elapsedMs(started)}
+		return probeAttempt{Success: true, Elapsed: elapsedMs(started), RateMultiplier: firstNonNilRate(rateMultiplierFromHeaders(resp.Header), responseRate)}
 	}
 	nonStream := m.chatNonStream(ctx, endpoint, requestBody, started)
 	if nonStream.Success {
+		nonStream.RateMultiplier = firstNonNilRate(responseRate, nonStream.RateMultiplier)
 		return nonStream
 	}
 	errorText := firstNonEmpty(nonStream.Error, streamError, "stream ended before first output")
@@ -1585,9 +1859,10 @@ func (m *Monitor) responsesAttempt(ctx context.Context, endpoint Endpoint, reque
 		return probeAttempt{Retryable: true, Elapsed: elapsedMs(started), Error: truncateError(err.Error())}
 	}
 	defer resp.Body.Close()
+	responseRate := rateMultiplierFromHeaders(resp.Header)
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := readBodyLimit(resp.Body, 240)
-		return probeAttempt{Retryable: isRetryableStatus(resp.StatusCode), Elapsed: elapsedMs(started), Error: fmt.Sprintf("Responses HTTP %d: %s", resp.StatusCode, detailFromBody(raw))}
+		return probeAttempt{Retryable: isRetryableStatus(resp.StatusCode), Elapsed: elapsedMs(started), Error: fmt.Sprintf("HTTP %d: Responses: %s", resp.StatusCode, detailFromBody(raw))}
 	}
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 	if !strings.Contains(contentType, "text/event-stream") {
@@ -1600,7 +1875,7 @@ func (m *Monitor) responsesAttempt(ctx context.Context, endpoint Endpoint, reque
 			return probeAttempt{Retryable: false, Elapsed: elapsedMs(started), Error: "Responses 响应 JSON 无效：" + truncateError(err.Error())}
 		}
 		if responsesOutputPresent(payload) {
-			return probeAttempt{Success: true, Elapsed: elapsedMs(started)}
+			return probeAttempt{Success: true, Elapsed: elapsedMs(started), RateMultiplier: firstNonNilRate(responseRate, rateMultiplierFromPayload(payload))}
 		}
 		return probeAttempt{Retryable: false, Elapsed: elapsedMs(started), Error: firstNonEmpty(extractErrorMessage(payload), "Responses API 响应缺少模型输出")}
 	}
@@ -1627,12 +1902,13 @@ func (m *Monitor) responsesAttempt(ctx context.Context, endpoint Endpoint, reque
 			continue
 		}
 		lastPayload = payload
+		responseRate = firstNonNilRate(responseRate, rateMultiplierFromPayload(payload))
 		if errorText := extractErrorMessage(payload); errorText != "" {
 			return probeAttempt{Retryable: true, Elapsed: elapsedMs(started), Error: truncateError(errorText)}
 		}
 		payloadType := stringValue(payload["type"])
 		if responsesStreamOutput(firstNonEmpty(eventName, payloadType), payload) {
-			return probeAttempt{Success: true, Elapsed: elapsedMs(started)}
+			return probeAttempt{Success: true, Elapsed: elapsedMs(started), RateMultiplier: responseRate}
 		}
 		eventName = ""
 	}
@@ -1640,7 +1916,7 @@ func (m *Monitor) responsesAttempt(ctx context.Context, endpoint Endpoint, reque
 		return probeAttempt{Retryable: true, Elapsed: elapsedMs(started), Error: truncateError(err.Error())}
 	}
 	if responsesOutputPresent(lastPayload) {
-		return probeAttempt{Success: true, Elapsed: elapsedMs(started)}
+		return probeAttempt{Success: true, Elapsed: elapsedMs(started), RateMultiplier: responseRate}
 	}
 	return probeAttempt{Retryable: false, Elapsed: elapsedMs(started), Error: "Responses 流在首个输出前结束"}
 }
@@ -1651,6 +1927,15 @@ func cloneMap(value map[string]any) map[string]any {
 		result[key] = item
 	}
 	return result
+}
+
+func shouldFallbackToChat(attempt probeAttempt) bool {
+	status := statusFromError(attempt.Error)
+	if status == 400 || status == 404 || status == 405 || status == 422 || status >= 500 {
+		return true
+	}
+	lower := strings.ToLower(strings.TrimSpace(attempt.Error))
+	return strings.HasPrefix(lower, "responses ") || strings.Contains(lower, "context deadline exceeded")
 }
 
 func (m *Monitor) checkModel(endpoint Endpoint, group Group, modelID string) Record {
@@ -1678,7 +1963,16 @@ func (m *Monitor) checkModel(endpoint Endpoint, group Group, modelID string) Rec
 	attempts := 0
 	lastError := ""
 	consecutiveHTTPFailures := 0
-	responsesFallbackAttempted := false
+	useResponses := true
+	protocol := "responses"
+	if cached, ok := m.cachedRateMultiplier(endpoint); ok {
+		record.RateMultiplier = cached
+	}
+	resolveRate := func(direct *float64) *float64 {
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		defer cancel()
+		return m.resolveRateMultiplier(ctx, endpoint, direct)
+	}
 
 	for {
 		if !time.Now().Before(deadline) {
@@ -1688,11 +1982,35 @@ func (m *Monitor) checkModel(endpoint Endpoint, group Group, modelID string) Rec
 			return finishCheckTimeout(record, timeoutSeconds, attempts, lastError, elapsedMs(started))
 		}
 		attempts++
-		ctx, cancel := context.WithDeadline(context.Background(), deadline)
-		attempt := m.chatAttempt(ctx, endpoint, requestBody, started)
-		cancel()
+		attempt := probeAttempt{}
+		if useResponses {
+			responsesDeadline := deadline
+			if fallbackDeadline := time.Now().Add(responsesFallbackTimeout); fallbackDeadline.Before(responsesDeadline) {
+				responsesDeadline = fallbackDeadline
+			}
+			ctx, cancel := context.WithDeadline(context.Background(), responsesDeadline)
+			attempt = m.responsesAttempt(ctx, endpoint, requestBody, started)
+			cancel()
+			if !attempt.Success && shouldFallbackToChat(attempt) {
+				useResponses = false
+				protocol = "chat"
+				ctx, cancel = context.WithDeadline(context.Background(), deadline)
+				chatAttempt := m.chatAttempt(ctx, endpoint, requestBody, started)
+				cancel()
+				if chatAttempt.Success || chatAttempt.Error != "" {
+					attempt = chatAttempt
+				}
+			}
+		} else {
+			protocol = "chat"
+			ctx, cancel := context.WithDeadline(context.Background(), deadline)
+			attempt = m.chatAttempt(ctx, endpoint, requestBody, started)
+			cancel()
+		}
 		if attempt.Success {
 			record.TTFTMs = floatPointer(attempt.Elapsed)
+			record.RateMultiplier = resolveRate(attempt.RateMultiplier)
+			record.ProbeProtocol = protocol
 			if attempt.Elapsed > float64(fluctuationThreshold/time.Millisecond) {
 				record.Status = "fluctuation"
 				record.Error = fmt.Sprintf("检测波动：%.1f秒后恢复，共尝试 %d 次", attempt.Elapsed/1000, attempts)
@@ -1703,24 +2021,6 @@ func (m *Monitor) checkModel(endpoint Endpoint, group Group, modelID string) Rec
 		}
 		lastError = firstNonEmpty(attempt.Error, "检测失败")
 		status := statusFromError(lastError)
-		if !responsesFallbackAttempted && status != 0 && (status >= 500 || status == 404 || status == 405) {
-			responsesFallbackAttempted = true
-			responsesStarted := time.Now()
-			ctx, cancel := context.WithDeadline(context.Background(), deadline)
-			fallback := m.responsesAttempt(ctx, endpoint, requestBody, responsesStarted)
-			cancel()
-			if fallback.Success {
-				record.TTFTMs = floatPointer(fallback.Elapsed)
-				if fallback.Elapsed > float64(fluctuationThreshold/time.Millisecond) {
-					record.Status = "fluctuation"
-					record.Error = fmt.Sprintf("检测波动：%.1f秒后恢复，共尝试 %d 次", fallback.Elapsed/1000, attempts)
-				} else {
-					record.Status = "ok"
-				}
-				record.ProbeProtocol = "responses"
-				return record
-			}
-		}
 		if !attempt.Retryable {
 			return finishCheckError(record, attempts, lastError, attempt.Elapsed)
 		}
@@ -2277,8 +2577,8 @@ func (m *Monitor) buildDashboardPayload() (map[string]any, error) {
 			"group_id": record.GroupID, "group_name": record.GroupName, "model": record.Model,
 			"status": record.Status, "ttft_ms": pointerValue(record.TTFTMs), "checked_at": record.CheckedAt,
 			"checked_at_ts": record.CheckedAtTS, "endpoint_enabled": endpoint.Enabled, "group_enabled": group.Enabled,
-			"endpoint_ping_ms": valueOrNil(pings[record.EndpointID]),
-			"windows":          map[string]windowStat{}, "recent_results": recentToAny(recent[modelKey(record.EndpointID, record.Model)]),
+			"rate_multiplier": pointerValue(record.RateMultiplier), "endpoint_ping_ms": valueOrNil(pings[record.EndpointID]),
+			"windows": map[string]windowStat{}, "recent_results": recentToAny(recent[modelKey(record.EndpointID, record.Model)]),
 		}
 		if record.Error != "" {
 			publicRecord["error"] = record.Error
@@ -2317,7 +2617,7 @@ func (m *Monitor) buildDashboardPayload() (map[string]any, error) {
 		}
 		groupPayload = append(groupPayload, map[string]any{
 			"id": group.ID, "name": group.Name, "description": group.Description, "enabled": group.Enabled,
-			"check_interval": group.CheckInterval, "timeout": group.Timeout, "default_model": group.DefaultModel,
+			"icon": group.Icon, "check_interval": group.CheckInterval, "timeout": group.Timeout, "default_model": group.DefaultModel,
 			"display_model": dashboardDisplayModel(group, rows),
 			"current":       countRecords(groupRecords), "windows": groupedWindowPayload(groupWindows, group.ID),
 		})
@@ -3460,7 +3760,7 @@ func main() {
 	go monitor.qqMentionLoop()
 	address := net.JoinHostPort(monitor.listenHost, strconv.Itoa(monitor.listenPort))
 	server := &http.Server{Addr: address, Handler: monitor, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
-	log.Printf("[INFO] Model Monitor Go v3.0 listening on http://%s", address)
+	log.Printf("[INFO] Model Monitor Go v3.0.2 listening on http://%s", address)
 	log.Printf("[INFO] Data dir: %s", monitor.dataDir)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("HTTP server: %v", err)

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,6 +52,65 @@ func TestNormalizeConfigMigratesEndpointTimeout(t *testing.T) {
 	normalized := normalizeConfig(raw)
 	if normalized.Groups[0].Timeout != 77 {
 		t.Fatalf("timeout = %d, want 77", normalized.Groups[0].Timeout)
+	}
+}
+
+func TestNormalizeConfigGroupIcon(t *testing.T) {
+	raw := configAsMap(t, defaultConfig())
+	groups := raw["groups"].([]any)
+	delete(groups[0].(map[string]any), "icon")
+	if icon := normalizeConfig(raw).Groups[0].Icon; icon != "openai" {
+		t.Fatalf("legacy group icon = %q, want openai", icon)
+	}
+	groups[0].(map[string]any)["icon"] = "gemini"
+	if icon := normalizeConfig(raw).Groups[0].Icon; icon != "gemini" {
+		t.Fatalf("configured group icon = %q, want gemini", icon)
+	}
+	groups[0].(map[string]any)["icon"] = "unknown"
+	if icon := normalizeConfig(raw).Groups[0].Icon; icon != "openai" {
+		t.Fatalf("invalid group icon = %q, want openai", icon)
+	}
+}
+
+func TestInitDBMigratesRateMultiplierColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE checks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		endpoint_id TEXT NOT NULL,
+		endpoint_name TEXT NOT NULL,
+		group_id TEXT NOT NULL,
+		group_name TEXT NOT NULL,
+		model_id TEXT NOT NULL,
+		status TEXT NOT NULL,
+		ttft_ms REAL,
+		error TEXT,
+		checked_at REAL NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	monitor := newMonitor()
+	monitor.dbPath = path
+	if err := monitor.initDB(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = monitor.db.Close() })
+	if _, err := monitor.db.Exec("SELECT rate_multiplier FROM checks LIMIT 0"); err != nil {
+		t.Fatalf("rate_multiplier column was not migrated: %v", err)
+	}
+}
+
+func TestDashboardHidesAdminShortcut(t *testing.T) {
+	if strings.Contains(dashboardPage, `href="/admin"`) {
+		t.Fatal("public dashboard still links to the admin page")
 	}
 }
 
@@ -148,6 +209,87 @@ func TestCheckModelRetriesHTTPFailureThenSucceeds(t *testing.T) {
 	}
 }
 
+func TestCheckModelPrefersResponsesAndCapturesRateMultiplier(t *testing.T) {
+	var responseCalls, chatCalls, billingCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/responses":
+			if got := r.Header.Get("X-Request-ID"); got == "" {
+				t.Error("Responses X-Request-ID was not set")
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode Responses body: %v", err)
+			}
+			if _, exists := body["max_output_tokens"]; exists {
+				t.Error("Responses request contains unsupported max_output_tokens")
+			}
+			responseCalls.Add(1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\",\"effective_rate_multiplier\":1.75}\n\n"))
+		case "/v1/chat/completions":
+			chatCalls.Add(1)
+			http.Error(w, "chat should not be called", http.StatusInternalServerError)
+		case "/v1/sub2api/billing":
+			billingCalls.Add(1)
+			http.Error(w, "billing should not be called", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	monitor := newMonitor()
+	endpoint := Endpoint{ID: "api", Name: "test", BaseURL: server.URL, TestPrompt: "Hi", Enabled: true}
+	group := Group{ID: "group", Name: "test", Enabled: true, Timeout: 5}
+	record := monitor.checkModel(endpoint, group, "demo")
+	if record.Status != "ok" || record.ProbeProtocol != "responses" {
+		t.Fatalf("record = %#v, want successful responses probe", record)
+	}
+	if record.RateMultiplier == nil || *record.RateMultiplier != 1.75 {
+		t.Fatalf("rate multiplier = %v, want 1.75", pointerValue(record.RateMultiplier))
+	}
+	if responseCalls.Load() != 1 || chatCalls.Load() != 0 || billingCalls.Load() != 0 {
+		t.Fatalf("calls: responses=%d chat=%d billing=%d", responseCalls.Load(), chatCalls.Load(), billingCalls.Load())
+	}
+}
+
+func TestCheckModelFallsBackToChatAndBillingRate(t *testing.T) {
+	var responseCalls, chatCalls, billingCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/responses":
+			responseCalls.Add(1)
+			http.NotFound(w, r)
+		case "/v1/chat/completions":
+			chatCalls.Add(1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"))
+		case "/v1/sub2api/billing":
+			billingCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"effective_rate_multiplier":"2.5x"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	monitor := newMonitor()
+	endpoint := Endpoint{ID: "api", Name: "test", BaseURL: server.URL, TestPrompt: "Hi", Enabled: true}
+	group := Group{ID: "group", Name: "test", Enabled: true, Timeout: 5}
+	record := monitor.checkModel(endpoint, group, "demo")
+	if record.Status != "ok" || record.ProbeProtocol != "chat" {
+		t.Fatalf("record = %#v, want successful chat fallback", record)
+	}
+	if record.RateMultiplier == nil || *record.RateMultiplier != 2.5 {
+		t.Fatalf("rate multiplier = %v, want 2.5", pointerValue(record.RateMultiplier))
+	}
+	if responseCalls.Load() != 1 || chatCalls.Load() != 1 || billingCalls.Load() != 1 {
+		t.Fatalf("calls: responses=%d chat=%d billing=%d", responseCalls.Load(), chatCalls.Load(), billingCalls.Load())
+	}
+}
+
 func TestResponsesStreamOutputDetection(t *testing.T) {
 	if !responsesStreamOutput("response.output_item.added", map[string]any{"type": "response.output_item.added"}) {
 		t.Error("output item event was not detected")
@@ -164,9 +306,10 @@ func TestDashboardUsesSQLiteHistory(t *testing.T) {
 	model := "demo"
 	checkedAt := nowUnix()
 	ttft := 125.0
+	rate := 1.5
 	record := Record{
 		EndpointID: endpoint.ID, EndpointName: endpoint.Name, GroupID: group.ID, GroupName: group.Name,
-		Model: model, Status: "ok", TTFTMs: &ttft, CheckedAt: formatTimeString(checkedAt), CheckedAtTS: checkedAt,
+		Model: model, Status: "ok", TTFTMs: &ttft, RateMultiplier: &rate, CheckedAt: formatTimeString(checkedAt), CheckedAtTS: checkedAt,
 	}
 	monitor.stateMu.Lock()
 	monitor.latestResults[modelKey(endpoint.ID, model)] = record
@@ -189,6 +332,17 @@ func TestDashboardUsesSQLiteHistory(t *testing.T) {
 	models := payload["models"].([]map[string]any)
 	if len(models) != 1 || models[0]["model"] != model {
 		t.Fatalf("models = %#v", models)
+	}
+	if models[0]["rate_multiplier"] != rate {
+		t.Fatalf("dashboard rate multiplier = %#v, want %v", models[0]["rate_multiplier"], rate)
+	}
+	groups := payload["groups"].([]map[string]any)
+	if groups[0]["icon"] != "openai" {
+		t.Fatalf("dashboard group icon = %#v, want openai", groups[0]["icon"])
+	}
+	recent := models[0]["recent_results"].([]any)
+	if len(recent) != 1 || recent[0].(recentResult).RateMultiplier == nil || *recent[0].(recentResult).RateMultiplier != rate {
+		t.Fatalf("recent rate multiplier = %#v, want %v", recent, rate)
 	}
 }
 

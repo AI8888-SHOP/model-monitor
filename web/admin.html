@@ -181,6 +181,15 @@ function notice(text, cls='muted') {
 function groupOptions(selected) {
   return state.config.groups.map(group => `<option value="${esc(group.id)}" ${group.id === selected ? 'selected' : ''}>${esc(group.name)}</option>`).join('');
 }
+function groupIconOptions(selected) {
+  const current = ['openai', 'grok', 'gemini', 'claude'].includes(selected) ? selected : 'openai';
+  return [
+    {value: 'openai', label: 'OpenAI'},
+    {value: 'grok', label: 'Grok'},
+    {value: 'gemini', label: 'Gemini'},
+    {value: 'claude', label: 'Claude'},
+  ].map(option => `<option value="${option.value}" ${option.value === current ? 'selected' : ''}>${option.label}</option>`).join('');
+}
 function modelReferenceValue(reference) {
   return reference && reference.endpoint_id && reference.model_id
     ? `${reference.endpoint_id}|${reference.model_id}`
@@ -319,6 +328,7 @@ function renderGroups() {
     <tr data-index="${idx}">
       <td><input data-field="name" value="${esc(group.name)}"></td>
       <td><input data-field="description" value="${esc(group.description || '')}"></td>
+      <td><select data-field="icon">${groupIconOptions(group.icon)}</select></td>
       <td><select data-field="enabled"><option value="true" ${group.enabled ? 'selected' : ''}>启用</option><option value="false" ${!group.enabled ? 'selected' : ''}>停用</option></select></td>
       <td><input data-field="check_interval" type="number" min="10" max="86400" value="${esc(group.check_interval || state.config.check_interval || 60)}"></td>
       <td><input data-field="timeout" type="number" min="5" max="600" value="${esc(group.timeout || 180)}"></td>
@@ -326,7 +336,7 @@ function renderGroups() {
       <td class="mono muted">${esc(group.id)}</td>
       <td><div class="row-actions"><button data-action="move-group-up" type="button" ${idx === 0 ? 'disabled' : ''}>上移</button><button data-action="move-group-down" type="button" ${idx === state.config.groups.length - 1 ? 'disabled' : ''}>下移</button><button data-action="clear-group" type="button">清零</button><button class="danger" data-action="delete-group" type="button">删除</button></div></td>
     </tr>`).join('');
-  document.getElementById('groupTable').innerHTML = `<thead><tr><th>名称</th><th>备注</th><th>状态</th><th>检测间隔（秒）</th><th>检测超时（秒）</th><th>默认显示模型</th><th>ID</th><th>操作</th></tr></thead><tbody>${rows}</tbody>`;
+  document.getElementById('groupTable').innerHTML = `<thead><tr><th>名称</th><th>备注</th><th>品牌图标</th><th>状态</th><th>检测间隔（秒）</th><th>检测超时（秒）</th><th>默认显示模型</th><th>ID</th><th>操作</th></tr></thead><tbody>${rows}</tbody>`;
   document.querySelectorAll('#groupTable input, #groupTable select').forEach(el => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', event => {
     const tr = event.target.closest('tr');
     const group = state.config.groups[Number(tr.dataset.index)];
@@ -571,12 +581,12 @@ document.getElementById('qqClearAllBtn').addEventListener('click', () => {
   renderQQModels();
 });
 document.getElementById('addGroupBtn').addEventListener('click', () => {
-  state.config.groups.push({id: uid('grp'), name: '新分组', description: '', enabled: true, check_interval: state.config.check_interval || 60, timeout: 180, default_model: null});
+  state.config.groups.push({id: uid('grp'), name: '新分组', description: '', icon: 'openai', enabled: true, check_interval: state.config.check_interval || 60, timeout: 180, default_model: null});
   renderAll();
 });
 document.getElementById('addApiBtn').addEventListener('click', () => {
   const group_id = state.config.groups[0] ? state.config.groups[0].id : uid('grp');
-  if (!state.config.groups.length) state.config.groups.push({id: group_id, name: '默认分组', description: '', enabled: true, check_interval: state.config.check_interval || 60, timeout: 180});
+  if (!state.config.groups.length) state.config.groups.push({id: group_id, name: '默认分组', description: '', icon: 'openai', enabled: true, check_interval: state.config.check_interval || 60, timeout: 180});
   state.config.endpoints.push({id: uid('api'), name: '新 API', base_url: 'http://host.docker.internal:8080', api_key: '', group_id, enabled: true, test_prompt: 'Hi', max_tokens: 16});
   renderAll();
 });

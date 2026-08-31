@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.2
+
+- Hid the admin shortcut from the public dashboard while keeping `/admin` available directly.
+- Added configurable OpenAI, Grok, Gemini, and Claude icons for model groups.
+- Made Responses API the preferred model probe with a Chat Completions compatibility fallback.
+- Added rate multiplier extraction, short-lived billing fallback caching, SQLite history storage, and dashboard display.
+- Displayed fluctuation as a distinct dashboard status while keeping latency visible.
+
 ## v3.0.1
 
 - Bound each group history chart directly to its configured default display model.

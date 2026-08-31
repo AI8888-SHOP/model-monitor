@@ -156,7 +156,7 @@
     background: currentColor;
     box-shadow: 0 0 10px currentColor;
   }
-  .icon-button, .admin-link {
+  .icon-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -165,7 +165,6 @@
     border-radius: 8px;
     color: var(--muted);
     background: rgba(19, 35, 56, .86);
-    text-decoration: none;
     font-size: 12px;
   }
   .icon-button {
@@ -174,11 +173,10 @@
     font-size: 18px;
     line-height: 1;
   }
-  .icon-button:hover, .admin-link:hover {
+  .icon-button:hover {
     border-color: #4b667f;
     color: var(--text);
   }
-  .admin-link { gap: 6px; padding: 0 10px; }
   .refresh-copy {
     color: var(--muted);
     font-size: 11px;
@@ -303,6 +301,9 @@
   .model-card.has-error::before {
     background: linear-gradient(90deg, transparent, rgba(255, 99, 95, .5), transparent);
   }
+  .model-card.has-warning::before {
+    background: linear-gradient(90deg, transparent, rgba(224, 183, 42, .5), transparent);
+  }
   .card-head {
     display: flex;
     align-items: flex-start;
@@ -317,6 +318,11 @@
     gap: 11px;
   }
   .model-mark { width: 38px; height: 38px; flex: 0 0 auto; }
+  .model-mark.brand-openai { color: #65d6bd; background: rgba(24, 100, 95, .25); }
+  .model-mark.brand-grok { color: #f2f5f7; background: rgba(103, 113, 128, .2); }
+  .model-mark.brand-gemini { color: #8abaff; background: rgba(55, 101, 174, .22); }
+  .model-mark.brand-claude { color: #f0ae72; background: rgba(151, 85, 42, .22); }
+  .brand-svg { display: block; width: 22px; height: 22px; }
   .identity-copy { min-width: 0; }
   .group-label {
     overflow: hidden;
@@ -376,11 +382,25 @@
     color: var(--red);
     background: rgba(149, 43, 48, .17);
   }
+  .state-badge.warn {
+    border-color: rgba(224, 183, 42, .26);
+    color: var(--amber);
+    background: rgba(147, 107, 23, .18);
+  }
   .state-badge.pending {
     border-color: var(--line);
     color: var(--muted);
     background: rgba(100, 120, 139, .14);
   }
+  .status-stack { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: 5px; }
+  .rate-label {
+    color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .rate-label strong { color: var(--blue); font-weight: 700; }
 
   .metric-grid {
     display: grid;
@@ -667,6 +687,7 @@
     white-space: nowrap;
   }
   .detail-status.danger { color: var(--red); background: rgba(149, 43, 48, .2); }
+  .detail-status.warn { color: var(--amber); background: rgba(147, 107, 23, .2); }
   .detail-number { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .detail-number.good { color: var(--green); }
   .detail-number.warn { color: var(--amber); }
@@ -735,7 +756,6 @@
       <span id="overallHealth" class="health-pill pending"><span class="health-dot"></span><strong>INITIALIZING</strong></span>
       <button id="refreshButton" class="icon-button" type="button" title="立即刷新" aria-label="立即刷新">↻</button>
       <span class="refresh-copy">自动刷新: <strong id="refreshCountdown">30s</strong></span>
-      <a class="admin-link" href="/admin" title="打开管理后台">管理 <span aria-hidden="true">→</span></a>
     </div>
   </header>
 
@@ -753,6 +773,7 @@
       <select id="statusFilter" class="filter-select" aria-label="按状态筛选">
         <option value="">全部状态</option>
         <option value="ok">正常</option>
+        <option value="fluctuation">波动</option>
         <option value="timeout">超时</option>
         <option value="error">异常</option>
       </select>
@@ -784,17 +805,33 @@
 <script>
 const REFRESH_SECONDS = 30;
 const state = {payload: null, period: '1h', loading: false, refreshSeconds: REFRESH_SECONDS, openGroupId: null, lastFocused: null};
+const BRAND_ICONS = {
+  openai: '<path d="M12 3.2a4.55 4.55 0 0 1 4.34 3.18 4.55 4.55 0 0 1 2.46 7.5 4.55 4.55 0 0 1-6.8 5.92 4.55 4.55 0 0 1-6.8-5.92 4.55 4.55 0 0 1 2.46-7.5A4.55 4.55 0 0 1 12 3.2Z" fill="none" stroke="currentColor" stroke-width="1.55"/><path d="m8.2 8.4 7.6 4.4m-7.6 2.8 7.6-4.4m-5.8-8v8.8m3.6-6.7-7.6 4.4m0 4.2 7.6 4.4m-5.8-8v8.8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.35"/>',
+  grok: '<path d="M5 4.5 19 19.5M19 4.5 5 19.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.3"/><path d="M12 7.2v9.6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.25" opacity=".7"/>',
+  gemini: '<path d="M12 2.8c.85 4.85 4.35 8.35 9.2 9.2-4.85.85-8.35 4.35-9.2 9.2C11.15 16.35 7.65 12.85 2.8 12 7.65 11.15 11.15 7.65 12 2.8Z" fill="currentColor"/><path d="M5.3 18.7c1.45-1.45 2.85-2.1 4.4-2.1" fill="none" stroke="#0b1521" stroke-linecap="round" stroke-width="1.15" opacity=".75"/>',
+  claude: '<path d="M12 3.2 14.3 9.7 20.8 12l-6.5 2.3L12 20.8l-2.3-6.5L3.2 12l6.5-2.3L12 3.2Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.75"/><circle cx="12" cy="12" r="2.25" fill="currentColor"/>',
+};
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
 }
 function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+function brandIconSvg(icon) {
+  const key = Object.prototype.hasOwnProperty.call(BRAND_ICONS, icon) ? icon : 'openai';
+  return `<svg class="brand-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${BRAND_ICONS[key]}</svg>`;
 }
 function formatMs(value) {
   const number = finiteNumber(value);
   return number === null ? '--' : String(Math.max(0, Math.round(number)));
+}
+function formatMultiplier(value) {
+  const number = finiteNumber(value);
+  if (number === null) return '--';
+  return number.toFixed(4).replace(/\.?(0+)$/, '') || '0';
 }
 function latencyTone(value) {
   const number = finiteNumber(value);
@@ -824,11 +861,13 @@ function currentStat(row) {
 function statusMeta(row) {
   if (row && row.status === 'timeout') return {label: '超时', tone: 'danger'};
   if (row && row.status === 'error') return {label: '异常', tone: 'danger'};
+  if (row && row.status === 'fluctuation') return {label: '波动', tone: 'warn'};
   return {label: '正常', tone: 'good'};
 }
 function barTone(item) {
   if (!item) return 'empty';
   if (item.status === 'timeout' || item.status === 'error') return 'bad';
+  if (item.status === 'fluctuation') return 'warn';
   const tone = latencyTone(item.ttft_ms);
   return tone === 'warn' ? 'warn' : tone === 'bad' ? 'bad' : 'good';
 }
@@ -873,19 +912,21 @@ function cardHtml(group, rows) {
   const availability = finiteNumber(stat.availability);
   const availabilityText = availability === null ? '--' : `${availability.toFixed(2)}%`;
   const errorTitle = row && (row.error || (meta.tone === 'danger' ? meta.label : ''));
-  const cardClass = meta.tone === 'danger' ? 'model-card group-card has-error' : 'model-card group-card';
+  const cardClass = meta.tone === 'danger' ? 'model-card group-card has-error' : meta.tone === 'warn' ? 'model-card group-card has-warning' : 'model-card group-card';
   const defaultLabel = row ? `${row.endpoint_name || 'API'} / ${row.model || '未知模型'}` : '尚未发现模型';
+  const multiplier = formatMultiplier(row && row.rate_multiplier);
+  const multiplierLabel = multiplier === '--' ? '-- 倍率' : `${multiplier}x 倍率`;
   return `<article class="${cardClass}" data-group-id="${esc(group.id)}" tabindex="0" role="button" aria-label="打开${esc(group.name)}分组详情" title="${esc(errorTitle || '查看分组详情')}">
     <div class="card-head">
       <div class="identity">
-        <span class="model-mark" aria-hidden="true">✦</span>
+        <span class="model-mark brand-${esc(group.icon || 'openai')}" aria-hidden="true">${brandIconSvg(group.icon)}</span>
         <div class="identity-copy">
           <div class="group-label">${esc(group.description || `${rows.length} 个模型`)}</div>
           <h2>${esc(group.name || '未命名分组')}</h2>
           <div class="model-line"><span class="api-badge">默认</span><span class="model-id" title="${esc(defaultLabel)}">${esc(defaultLabel)}</span></div>
         </div>
       </div>
-      <span class="state-badge ${meta.tone === 'danger' ? 'danger' : meta.tone === 'pending' ? 'pending' : ''}">${meta.label}</span>
+      <div class="status-stack"><span class="state-badge ${meta.tone === 'danger' ? 'danger' : meta.tone === 'warn' ? 'warn' : meta.tone === 'pending' ? 'pending' : ''}">${meta.label}</span><span class="rate-label"><strong>${esc(multiplierLabel)}</strong></span></div>
     </div>
 
     <div class="metric-grid">
@@ -925,7 +966,6 @@ function fillFilters(payload) {
 }
 function rowMatchesStatus(row, status) {
   if (!status) return true;
-  if (status === 'ok') return ['ok', 'fluctuation'].includes(row.status);
   return row.status === status;
 }
 function rowMatchesSearch(row, search) {
@@ -974,7 +1014,7 @@ function detailTableHtml(rows) {
     const meta = statusMeta(row);
     return `<tr title="${esc(row.error || '')}">
       <td class="detail-model"><strong>${esc(row.model || '未知模型')}</strong><small>${esc(row.endpoint_name || '未命名 API')}</small></td>
-      <td><span class="detail-status ${meta.tone === 'danger' ? 'danger' : ''}">${meta.label}</span></td>
+      <td><span class="detail-status ${meta.tone === 'danger' ? 'danger' : meta.tone === 'warn' ? 'warn' : ''}">${meta.label}</span></td>
       <td>${detailNumber(row.ttft_ms, latencyTone(row.ttft_ms))}</td>
       <td>${detailNumber(row.endpoint_ping_ms, latencyTone(row.endpoint_ping_ms))}</td>
       <td>${detailAvailability(row)}</td>
