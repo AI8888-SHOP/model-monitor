@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.0.3
+
+- Simplified QQ status push failures to display only a concise failure state.
+
 ## v3.0.2
 
 - Hid the admin shortcut from the public dashboard while keeping `/admin` available directly.
