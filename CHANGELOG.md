@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.0.4
+
+- Simplified QQ timeout status pushes to display only the timeout state.
+
 ## v3.0.3
 
 - Simplified QQ status push failures to display only a concise failure state.

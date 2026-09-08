@@ -3044,7 +3044,7 @@ func (m *Monitor) buildQQStatusMessage(snapshot Config, records []Record, test b
 			lines = append(lines, "[波动] "+label+suffix)
 		case "timeout":
 			timeoutCount++
-			lines = append(lines, "[超时] "+label+" - "+firstNonEmpty(strings.ReplaceAll(record.Error, "\n", " "), "检测超时"))
+			lines = append(lines, "[超时] "+label)
 		default:
 			errorCount++
 			// QQ 推送只展示简短状态，详细错误保留在后台记录中。
