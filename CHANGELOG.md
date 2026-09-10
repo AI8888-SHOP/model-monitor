@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.0.5
+
+- Updated QQ status pushes to use emoji indicators for normal, fluctuating, timeout, and failed states.
+
 ## v3.0.4
 
 - Simplified QQ timeout status pushes to display only the timeout state.

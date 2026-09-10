@@ -3024,7 +3024,7 @@ func (m *Monitor) buildQQStatusMessage(snapshot Config, records []Record, test b
 		record, exists := byKey[modelKey(item.EndpointID, item.ModelID)]
 		if !exists {
 			waitingCount++
-			lines = append(lines, "[等待] "+label)
+			lines = append(lines, "⏳ "+label)
 			continue
 		}
 		switch record.Status {
@@ -3034,21 +3034,21 @@ func (m *Monitor) buildQQStatusMessage(snapshot Config, records []Record, test b
 			if record.TTFTMs != nil {
 				suffix = fmt.Sprintf(" %.0fms", *record.TTFTMs)
 			}
-			lines = append(lines, "[正常] "+label+suffix)
+			lines = append(lines, "🟢 "+label+suffix)
 		case "fluctuation":
 			fluctuationCount++
 			suffix := ""
 			if record.TTFTMs != nil {
 				suffix = fmt.Sprintf(" - 延迟 %.1f秒", *record.TTFTMs/1000)
 			}
-			lines = append(lines, "[波动] "+label+suffix)
+			lines = append(lines, "🟡 "+label+suffix)
 		case "timeout":
 			timeoutCount++
-			lines = append(lines, "[超时] "+label)
+			lines = append(lines, "🔴 "+label)
 		default:
 			errorCount++
 			// QQ 推送只展示简短状态，详细错误保留在后台记录中。
-			lines = append(lines, "[失败] "+label)
+			lines = append(lines, "🔴 "+label)
 		}
 	}
 	title := "模型渠道状态"
